@@ -126,8 +126,8 @@
     const ACCESSORIES = {
       'incline-db':       { name: 'Incline Dumbbell Press', sets: 3, repsLow: 8,  repsHigh: 10, inc: 5,  startWeight: 50 },
       'close-grip':       { name: 'Close-Grip Bench Press', sets: 3, repsLow: 6,  repsHigh: 8,  inc: 5,  startWeight: 135 },
-      'tricep-pushdowns': { name: 'Tricep Pushdowns',       sets: 3, repsLow: 10, repsHigh: 12, inc: 5,  startWeight: 50 },
-      'db-rows':          { name: 'Dumbbell Rows',          sets: 3, repsLow: 8,  repsHigh: 10, inc: 5,  startWeight: 60 },
+      'tricep-ext-tonal': { name: 'Tricep Extension (Tonal)', sets: 3, repsLow: 10, repsHigh: 12, inc: 5,  startWeight: 50 },
+      'decline-fly-tonal':{ name: 'Decline Chest Fly (Tonal)', sets: 3, repsLow: 8,  repsHigh: 10, inc: 5,  startWeight: 40 },
       'goblet-squat':     { name: 'Goblet Squat',           sets: 3, repsLow: 8,  repsHigh: 10, inc: 5,  startWeight: 50 },
       'lat-pulldown':     { name: 'Lat Pulldown',           sets: 3, repsLow: 8,  repsHigh: 10, inc: 5,  startWeight: 120 },
       'db-ohp':           { name: 'Dumbbell Overhead Press',sets: 3, repsLow: 8,  repsHigh: 10, inc: 5,  startWeight: 35 },
@@ -145,7 +145,7 @@
     };
 
     const DAY_TEMPLATES = {
-      chest:    { id: 'chest',    name: 'Chest Day',     mainLift: 'bench',    mainName: 'Bench Press',          isVolume: false, accessories: ['incline-db', 'close-grip', 'tricep-pushdowns', 'db-rows'] },
+      chest:    { id: 'chest',    name: 'Chest Day',     mainLift: 'bench',    mainName: 'Bench Press',          isVolume: false, accessories: ['incline-db', 'close-grip', 'tricep-ext-tonal', 'decline-fly-tonal'] },
       fullbody: { id: 'fullbody', name: 'Full Body Day', mainLift: 'bench',    mainName: 'Bench Press (Volume)', isVolume: true,  accessories: ['goblet-squat', 'lat-pulldown', 'db-ohp', 'plank'] },
       legs:     { id: 'legs',     name: 'Leg Day',       mainLift: 'squat',    mainName: 'Back Squat',           isVolume: false, accessories: ['romanian-dl', 'leg-press', 'leg-curls', 'calf-raises', 'leg-raises'] },
       back:     { id: 'back',     name: 'Back Day',      mainLift: 'deadlift', mainName: 'Deadlift',             isVolume: false, accessories: ['pull-ups', 'barbell-rows', 'lat-pulldown-back', 'face-pulls', 'bicep-curls'] },
