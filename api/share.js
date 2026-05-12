@@ -6,9 +6,16 @@
 
 const KV_KEY = "iron-log:state:v1";
 
-async function kvGet() {
-  const r = await fetch(`${process.env.KV_REST_API_URL}/get/${KV_KEY}`, {
-    headers: { Authorization: `Bearer ${process.env.KV_REST_API_TOKEN}` },
+function findUpstashEnv() {
+  const env = process.env;
+  const urlKey = Object.keys(env).find((k) => /(^|_)KV_REST_API_URL$|UPSTASH_REDIS_REST_URL$/.test(k));
+  const tokenKey = Object.keys(env).find((k) => /(^|_)KV_REST_API_TOKEN$|UPSTASH_REDIS_REST_TOKEN$/.test(k));
+  return { url: urlKey ? env[urlKey] : null, token: tokenKey ? env[tokenKey] : null };
+}
+
+async function kvGet(url, token) {
+  const r = await fetch(`${url}/get/${KV_KEY}`, {
+    headers: { Authorization: `Bearer ${token}` },
     cache: "no-store",
   });
   if (!r.ok) throw new Error(`kv get ${r.status}`);
@@ -30,15 +37,14 @@ function publicView(s) {
 
 export default async function handler(req, res) {
   if (req.method !== "GET") return res.status(405).json({ error: "method not allowed" });
-  if (!process.env.KV_REST_API_URL || !process.env.KV_REST_API_TOKEN) {
-    return res.status(500).json({ error: "KV not configured" });
-  }
+  const { url, token: kvToken } = findUpstashEnv();
+  if (!url || !kvToken) return res.status(500).json({ error: "Upstash/KV env vars not found" });
   const token = req.query.t;
   if (!token || typeof token !== "string" || token.length < 8) {
     return res.status(400).json({ error: "missing token" });
   }
   try {
-    const state = await kvGet();
+    const state = await kvGet(url, kvToken);
     if (!state || !state.shareToken || state.shareToken !== token) {
       return res.status(404).json({ error: "not found" });
     }
