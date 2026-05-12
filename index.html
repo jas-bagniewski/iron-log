@@ -241,21 +241,110 @@
     // STORAGE (localStorage)
     // ============================================================
     const STORAGE_KEY = 'iron-log:v2';
+    const SECRET_KEY = 'iron-log:syncSecret';
     const defaultState = {
-      trainingMaxes: { bench: 230, squat: 250, deadlift: 295 },
+      // Calibrated 2026-05: bench 1RM 225, squat 155x5 (~181 e1RM), DL 165x10 hex (~220 e1RM).
+      trainingMaxes: { bench: 200, squat: 165, deadlift: 200 },
       cycle: 1, week: 1,
       completedThisWeek: { chest: false, fullbody: false, legs: false, back: false },
       accessoryLog: {}, history: [], activeSession: null,
+      shareToken: null,
     };
     const loadState = () => {
       try {
         const raw = localStorage.getItem(STORAGE_KEY);
-        if (raw) return { ...defaultState, ...JSON.parse(raw) };
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          // One-time TM recalibration (2026-05): if state still has the original
+          // placeholder maxes, replace them with the calibrated values.
+          const tm = parsed.trainingMaxes;
+          if (tm && tm.bench === 230 && tm.squat === 250 && tm.deadlift === 295) {
+            parsed.trainingMaxes = { bench: 200, squat: 165, deadlift: 200 };
+          }
+          return { ...defaultState, ...parsed };
+        }
       } catch (e) {}
       return defaultState;
     };
     const saveState = (s) => {
       try { localStorage.setItem(STORAGE_KEY, JSON.stringify(s)); } catch (e) { console.error(e); }
+    };
+
+    // ============================================================
+    // CLOUD SYNC (Vercel KV via /api/state)
+    // ============================================================
+    const cloudSync = (() => {
+      let saveTimer = null;
+      let lastSavedJson = '';
+      let listener = null;
+
+      const getSecret = () => {
+        try { return localStorage.getItem(SECRET_KEY) || null; } catch { return null; }
+      };
+      const setSecret = (s) => {
+        try {
+          if (s) localStorage.setItem(SECRET_KEY, s);
+          else localStorage.removeItem(SECRET_KEY);
+          lastSavedJson = '';
+        } catch (e) { console.error(e); }
+      };
+
+      const pull = async () => {
+        const secret = getSecret();
+        if (!secret) return { state: null, status: 'off' };
+        try {
+          const r = await fetch('/api/state', { headers: { 'x-sync-secret': secret }, cache: 'no-store' });
+          if (r.status === 401) return { state: null, status: 'unauthorized' };
+          if (!r.ok) return { state: null, status: 'error' };
+          const data = await r.json();
+          return { state: data.state, status: 'ok' };
+        } catch {
+          return { state: null, status: 'error' };
+        }
+      };
+
+      const push = async (state) => {
+        const secret = getSecret();
+        if (!secret) return 'off';
+        const payload = JSON.stringify(state);
+        try {
+          const r = await fetch('/api/state', {
+            method: 'POST',
+            headers: { 'x-sync-secret': secret, 'Content-Type': 'application/json' },
+            body: payload,
+          });
+          if (r.status === 401) return 'unauthorized';
+          if (!r.ok) return 'error';
+          lastSavedJson = payload;
+          return 'synced';
+        } catch {
+          return 'error';
+        }
+      };
+
+      const scheduleSave = (state) => {
+        if (saveTimer) clearTimeout(saveTimer);
+        saveTimer = setTimeout(async () => {
+          const secret = getSecret();
+          if (!secret) { listener && listener('off'); return; }
+          const payload = JSON.stringify(state);
+          if (payload === lastSavedJson) { listener && listener('synced'); return; }
+          listener && listener('syncing');
+          const status = await push(state);
+          listener && listener(status);
+        }, 1500);
+      };
+
+      const onStatus = (fn) => { listener = fn; };
+
+      return { getSecret, setSecret, pull, push, scheduleSave, onStatus };
+    })();
+
+    // Cryptographically random URL-safe token, ~22 chars.
+    const genShareToken = () => {
+      const bytes = new Uint8Array(16);
+      (window.crypto || window.msCrypto).getRandomValues(bytes);
+      return btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
     };
 
     // ============================================================
@@ -436,7 +525,22 @@
     // ============================================================
     // HOME VIEW
     // ============================================================
-    const HomeView = ({ state, onStart, onHistory, onSettings }) => {
+    const SyncBadge = ({ status }) => {
+      const cfg = {
+        off:          { label: 'Local only', color: 'text-neutral-500 border-neutral-800' },
+        syncing:      { label: 'Syncing…',   color: 'text-orange-300 border-orange-900/60' },
+        synced:       { label: 'Cloud synced', color: 'text-green-400 border-green-900/60' },
+        error:        { label: 'Sync error', color: 'text-red-400 border-red-900/60' },
+        unauthorized: { label: 'Bad secret', color: 'text-red-400 border-red-900/60' },
+      }[status] || { label: status, color: 'text-neutral-500 border-neutral-800' };
+      return (
+        <div className={`text-[10px] uppercase tracking-wider font-mono px-2 py-1 rounded border ${cfg.color}`}>
+          {cfg.label}
+        </div>
+      );
+    };
+
+    const HomeView = ({ state, syncStatus, onStart, onHistory, onSettings }) => {
       const total = state.history?.length || 0;
       const benchE = getBestE1RM(state.history, 'bench');
       const squatE = getBestE1RM(state.history, 'squat');
@@ -454,7 +558,8 @@
                 <div className="text-[10px] uppercase tracking-widest text-neutral-500 font-mono mt-1">4-DAY STRENGTH</div>
               </div>
             </div>
-            <div className="flex gap-2">
+            <div className="flex gap-2 items-center">
+              <SyncBadge status={syncStatus} />
               <button onClick={onHistory} className="w-10 h-10 rounded-lg border border-neutral-800 flex items-center justify-center text-neutral-400 hover:text-neutral-100 hover:border-neutral-700">
                 <History size={18} />
               </button>
@@ -671,12 +776,43 @@
     // ============================================================
     // SETTINGS VIEW
     // ============================================================
-    const SettingsView = ({ state, onBack, onUpdateState }) => {
+    const SettingsView = ({ state, syncStatus, onBack, onUpdateState, onResync }) => {
       const [showReset, setShowReset] = useState(false);
+      const [secretInput, setSecretInput] = useState(cloudSync.getSecret() || '');
+      const [secretSaved, setSecretSaved] = useState(false);
+      const [shareCopied, setShareCopied] = useState(false);
+
       const updateTM = (lift, v) => {
         const val = Math.max(45, round5(v));
         onUpdateState({ ...state, trainingMaxes: { ...state.trainingMaxes, [lift]: val } });
       };
+
+      const saveSecret = () => {
+        const v = secretInput.trim();
+        cloudSync.setSecret(v || null);
+        setSecretSaved(true);
+        setTimeout(() => setSecretSaved(false), 1500);
+        onResync && onResync();
+      };
+
+      const generateShareToken = () => {
+        onUpdateState({ ...state, shareToken: genShareToken() });
+      };
+      const revokeShareToken = () => {
+        onUpdateState({ ...state, shareToken: null });
+      };
+      const shareUrl = state.shareToken ? `${window.location.origin}/share/${state.shareToken}` : '';
+      const copyShareUrl = async () => {
+        if (!shareUrl) return;
+        try {
+          await navigator.clipboard.writeText(shareUrl);
+          setShareCopied(true);
+          setTimeout(() => setShareCopied(false), 1500);
+        } catch {
+          window.prompt('Copy this link:', shareUrl);
+        }
+      };
+
       return (
         <div className="px-5 pb-24 pt-6 max-w-2xl mx-auto">
           <button onClick={onBack} className="flex items-center gap-1 text-neutral-400 hover:text-neutral-100 text-sm uppercase tracking-wider mb-6">
@@ -703,6 +839,60 @@
                 </div>
               </div>
             ))}
+          </div>
+
+          <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-5 mb-4">
+            <div className="flex items-center justify-between mb-3">
+              <div className="text-xs uppercase tracking-[0.2em] text-neutral-500 font-mono">CLOUD SYNC</div>
+              <SyncBadge status={syncStatus} />
+            </div>
+            <div className="text-sm text-neutral-400 mb-4">
+              Paste your sync secret to mirror this device to the cloud (and to other devices using the same secret).
+            </div>
+            <div className="flex gap-2 mb-2">
+              <input
+                type="password"
+                value={secretInput}
+                onChange={(e) => setSecretInput(e.target.value)}
+                placeholder="sync secret"
+                className="flex-1 bg-neutral-900 border border-neutral-800 focus:border-orange-500 rounded-lg px-3 py-2 text-neutral-50 font-mono text-sm outline-none"
+              />
+              <button onClick={saveSecret} className="px-4 py-2 rounded-lg bg-orange-500 text-black uppercase tracking-wider text-xs font-bold hover:bg-orange-400">
+                {secretSaved ? 'Saved' : 'Save'}
+              </button>
+            </div>
+            <button onClick={onResync} className="w-full mt-2 py-2 rounded-lg border border-neutral-800 text-neutral-400 uppercase tracking-wider text-xs font-semibold hover:bg-neutral-900">
+              Force pull from cloud
+            </button>
+          </div>
+
+          <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-5 mb-4">
+            <div className="text-xs uppercase tracking-[0.2em] text-neutral-500 font-mono mb-3">COACH SHARE LINK</div>
+            <div className="text-sm text-neutral-400 mb-4">
+              Read-only link your PT can open in any browser. Rotating or revoking instantly invalidates the old link.
+            </div>
+            {state.shareToken ? (
+              <>
+                <div className="bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-3 mb-2 font-mono text-xs text-neutral-200 break-all">
+                  {shareUrl}
+                </div>
+                <div className="flex gap-2">
+                  <button onClick={copyShareUrl} className="flex-1 py-2 rounded-lg bg-orange-500 text-black uppercase tracking-wider text-xs font-bold hover:bg-orange-400">
+                    {shareCopied ? 'Copied' : 'Copy link'}
+                  </button>
+                  <button onClick={generateShareToken} className="flex-1 py-2 rounded-lg border border-neutral-800 text-neutral-300 uppercase tracking-wider text-xs font-semibold hover:bg-neutral-900">
+                    Rotate
+                  </button>
+                  <button onClick={revokeShareToken} className="flex-1 py-2 rounded-lg border border-red-900/40 text-red-400 uppercase tracking-wider text-xs font-semibold hover:bg-red-950/30">
+                    Revoke
+                  </button>
+                </div>
+              </>
+            ) : (
+              <button onClick={generateShareToken} className="w-full py-3 rounded-lg bg-orange-500 text-black uppercase tracking-wider text-sm font-bold hover:bg-orange-400">
+                Generate share link
+              </button>
+            )}
           </div>
 
           <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-5 mb-4">
@@ -778,8 +968,37 @@
       const [state, setState] = useState(() => loadState());
       const [view, setView] = useState('home');
       const [activeDayId, setActiveDayId] = useState(state.activeSession?.dayId || null);
+      const [syncStatus, setSyncStatus] = useState(cloudSync.getSecret() ? 'syncing' : 'off');
 
-      useEffect(() => { saveState(state); }, [state]);
+      // Hook up sync status callback
+      useEffect(() => { cloudSync.onStatus(setSyncStatus); }, []);
+
+      // Initial cloud pull on mount. Subsequent re-pulls go through handleResync.
+      useEffect(() => {
+        let cancelled = false;
+        (async () => {
+          if (!cloudSync.getSecret()) { setSyncStatus('off'); return; }
+          setSyncStatus('syncing');
+          const { state: cloud, status } = await cloudSync.pull();
+          if (cancelled) return;
+          if (status === 'unauthorized') { setSyncStatus('unauthorized'); return; }
+          if (status === 'error') { setSyncStatus('error'); return; }
+          if (cloud) {
+            setState((prev) => ({ ...prev, ...cloud, activeSession: cloud.activeSession ?? prev.activeSession }));
+            setSyncStatus('synced');
+          } else {
+            const s = await cloudSync.push(loadState());
+            setSyncStatus(s);
+          }
+        })();
+        return () => { cancelled = true; };
+      }, []);
+
+      useEffect(() => {
+        saveState(state);
+        if (cloudSync.getSecret()) cloudSync.scheduleSave(state);
+      }, [state]);
+
       useEffect(() => {
         const loader = document.getElementById('loader');
         if (loader) loader.classList.add('hide');
@@ -793,12 +1012,28 @@
       };
       const handleCancel = () => setView('home');
 
+      // Called from Settings after the secret changes or a manual pull is requested.
+      const handleResync = async () => {
+        if (!cloudSync.getSecret()) { setSyncStatus('off'); return; }
+        setSyncStatus('syncing');
+        const { state: cloud, status } = await cloudSync.pull();
+        if (status === 'unauthorized') { setSyncStatus('unauthorized'); return; }
+        if (status === 'error') { setSyncStatus('error'); return; }
+        if (cloud) {
+          setState((prev) => ({ ...prev, ...cloud, activeSession: cloud.activeSession ?? prev.activeSession }));
+          setSyncStatus('synced');
+        } else {
+          const s = await cloudSync.push(state);
+          setSyncStatus(s);
+        }
+      };
+
       return (
         <div className="min-h-screen bg-black text-neutral-100">
-          {view === 'home' && <HomeView state={state} onStart={handleStart} onHistory={() => setView('history')} onSettings={() => setView('settings')} />}
+          {view === 'home' && <HomeView state={state} syncStatus={syncStatus} onStart={handleStart} onHistory={() => setView('history')} onSettings={() => setView('settings')} />}
           {view === 'session' && activeDayId && <SessionView state={state} dayId={activeDayId} onComplete={handleComplete} onCancel={handleCancel} onUpdateState={setState} />}
           {view === 'history' && <HistoryView state={state} onBack={() => setView('home')} />}
-          {view === 'settings' && <SettingsView state={state} onBack={() => setView('home')} onUpdateState={setState} />}
+          {view === 'settings' && <SettingsView state={state} syncStatus={syncStatus} onBack={() => setView('home')} onUpdateState={setState} onResync={handleResync} />}
         </div>
       );
     };

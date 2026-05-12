@@ -57,9 +57,10 @@ export type AccessoryDef = {
 
 export const ACCESSORIES: Record<string, AccessoryDef> = {
   // CHEST DAY
-  "decline-fly":      { name: "Decline Chest Fly",      sets: 3, repsLow: 8,  repsHigh: 10, inc: 5,  startWeight: 40,  equipment: "tonal" },
-  "tricep-extension": { name: "Tricep Extension",       sets: 3, repsLow: 10, repsHigh: 12, inc: 5,  startWeight: 50,  equipment: "tonal" },
-  "seated-row":       { name: "Seated Row",             sets: 3, repsLow: 8,  repsHigh: 10, inc: 5,  startWeight: 40,  equipment: "tonal" },
+  "incline-db":         { name: "Incline Dumbbell Press",    sets: 3, repsLow: 8,  repsHigh: 10, inc: 5,  startWeight: 50,  equipment: "dumbbell" },
+  "close-grip":         { name: "Close-Grip Bench Press",    sets: 3, repsLow: 6,  repsHigh: 8,  inc: 5,  startWeight: 135, equipment: "barbell" },
+  "tricep-ext-tonal":   { name: "Tricep Extension (Tonal)",  sets: 3, repsLow: 10, repsHigh: 12, inc: 5,  startWeight: 50,  equipment: "tonal" },
+  "decline-fly-tonal":  { name: "Decline Chest Fly (Tonal)", sets: 3, repsLow: 8,  repsHigh: 10, inc: 5,  startWeight: 40,  equipment: "tonal" },
   // FULL BODY DAY
   "goblet-squat":     { name: "Goblet Squat",           sets: 3, repsLow: 8,  repsHigh: 10, inc: 5,  startWeight: 50 },
   "lat-pulldown":     { name: "Lat Pulldown",           sets: 3, repsLow: 8,  repsHigh: 10, inc: 5,  startWeight: 120 },
@@ -90,7 +91,7 @@ export type DayTemplate = {
 };
 
 export const DAY_TEMPLATES: Record<string, DayTemplate> = {
-  chest:    { id: "chest",    name: "Chest Day",     mainLift: "bench",    mainName: "Bench Press",          isVolume: false, accessories: ["decline-fly", "tricep-extension"] },
+  chest:    { id: "chest",    name: "Chest Day",     mainLift: "bench",    mainName: "Bench Press",          isVolume: false, accessories: ["incline-db", "close-grip", "tricep-ext-tonal", "decline-fly-tonal"] },
   fullbody: { id: "fullbody", name: "Full Body Day", mainLift: "bench",    mainName: "Bench Press (Volume)", isVolume: true,  accessories: ["goblet-squat", "lat-pulldown", "db-ohp", "plank"] },
   legs:     { id: "legs",     name: "Leg Day",       mainLift: "squat",    mainName: "Back Squat",           isVolume: false, accessories: ["romanian-dl", "leg-press", "leg-curls", "calf-raises", "leg-raises"] },
   back:     { id: "back",     name: "Back Day",      mainLift: "deadlift", mainName: "Deadlift",             isVolume: false, accessories: ["pull-ups", "barbell-rows", "lat-pulldown-back", "face-pulls", "bicep-curls"] },
@@ -156,10 +157,12 @@ export type AppState = {
   accessoryLog: AccessoryLog;
   history: Session[];
   activeSession: Session | null;
+  shareToken?: string | null;
 };
 
 export const defaultState: AppState = {
-  trainingMaxes: { bench: 230, squat: 250, deadlift: 295 },
+  // Calibrated 2026-05: bench 1RM 225, squat 155x5 (~181 e1RM), DL 165x10 hex (~220 e1RM).
+  trainingMaxes: { bench: 200, squat: 165, deadlift: 200 },
   cycle: 1,
   week: 1,
   completedThisWeek: { chest: false, fullbody: false, legs: false, back: false },

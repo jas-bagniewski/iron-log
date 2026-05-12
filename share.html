@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Iron Log — Coach View</title>
+  <meta name="robots" content="noindex,nofollow" />
+  <meta name="theme-color" content="#000000" />
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Anton&family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <style>
+    html, body { background: #000; color: #fafafa; font-family: 'Outfit', system-ui, sans-serif; }
+    .font-display { font-family: 'Anton', sans-serif; }
+    .font-mono { font-family: 'JetBrains Mono', monospace; }
+  </style>
+</head>
+<body class="min-h-screen">
+  <div id="root" class="px-5 pt-8 pb-20 max-w-2xl mx-auto"></div>
+
+  <script>
+    const DAY_NAMES = { chest: "Chest", fullbody: "Full Body", legs: "Legs", back: "Back" };
+    const WEEK_LABELS = { 1: "5s WEEK", 2: "3s WEEK", 3: "PR WEEK", 4: "DELOAD" };
+
+    const root = document.getElementById("root");
+
+    const tokenFromPath = () => {
+      const m = window.location.pathname.match(/\/share\/([^\/?#]+)/);
+      if (m) return decodeURIComponent(m[1]);
+      const q = new URLSearchParams(window.location.search);
+      return q.get("t");
+    };
+
+    const renderError = (msg) => {
+      root.innerHTML = `
+        <div class="font-display text-3xl tracking-wide mb-4">IRON LOG</div>
+        <div class="bg-neutral-950 border border-red-900/40 rounded-xl p-6 text-center">
+          <div class="text-red-400 font-semibold mb-1">Can't load</div>
+          <div class="text-neutral-400 text-sm">${msg}</div>
+        </div>`;
+    };
+
+    const fmtDate = (iso) => {
+      if (!iso) return "";
+      try { return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric" }); }
+      catch { return ""; }
+    };
+
+    const estimate1RM = (w, r) => (!w || !r) ? null : Math.round(w * (1 + r / 30));
+    const bestE1RM = (history, lift) => {
+      let best = 0;
+      (history || []).forEach((s) => {
+        if (s.mainLift !== lift || s.isVolume) return;
+        (s.mainSets || []).forEach((set) => {
+          if (set.isAmrap && set.actualReps && set.weight) {
+            const e = estimate1RM(set.weight, set.actualReps);
+            if (e && e > best) best = e;
+          }
+        });
+      });
+      return best || null;
+    };
+
+    const render = (s) => {
+      const tm = s.trainingMaxes || { bench: 0, squat: 0, deadlift: 0 };
+      const benchE = bestE1RM(s.history, "bench");
+      const squatE = bestE1RM(s.history, "squat");
+      const dlE = bestE1RM(s.history, "deadlift");
+
+      const tmBox = (label, val, best) => `
+        <div class="bg-neutral-950 border border-neutral-800 rounded-xl p-3">
+          <div class="text-[10px] uppercase tracking-wider text-neutral-500 mb-1">${label}</div>
+          <div class="font-mono text-xl font-bold text-neutral-50 leading-none">${val}<span class="text-neutral-500 text-xs ml-0.5 font-normal">lb</span></div>
+          ${best ? `<div class="text-[10px] text-neutral-500 mt-1 font-mono">est 1RM: ${best}</div>` : ""}
+        </div>`;
+
+      const accRow = (id, log) => {
+        const isBw = log.weight === 0;
+        const reps = (log.lastReps || []).join(" · ");
+        return `
+          <div class="flex items-center justify-between py-2 border-b border-neutral-900 last:border-0">
+            <div class="text-sm text-neutral-200">${id}</div>
+            <div class="text-right">
+              <div class="font-mono text-sm text-neutral-100">${isBw ? "bodyweight" : log.weight + " lb"}</div>
+              ${reps ? `<div class="text-[10px] text-neutral-500 font-mono">${reps}</div>` : ""}
+            </div>
+          </div>`;
+      };
+
+      const accEntries = Object.entries(s.accessoryLog || {});
+      const accBlock = accEntries.length === 0 ? `
+        <div class="text-sm text-neutral-500">No accessory data yet.</div>` :
+        accEntries.map(([id, log]) => accRow(id, log)).join("");
+
+      const histItem = (h) => {
+        const amrap = (h.mainSets || []).find((set) => set.isAmrap && set.actualReps);
+        return `
+          <div class="bg-neutral-950 border border-neutral-800 rounded-lg p-4">
+            <div class="flex items-start justify-between">
+              <div>
+                <div class="font-semibold text-neutral-50">${h.name || ""}</div>
+                <div class="text-xs text-neutral-500 font-mono">C${h.cycle}·W${h.week} · ${fmtDate(h.completedAt)}</div>
+              </div>
+              ${amrap ? `<div class="text-right">
+                <div class="font-mono text-orange-400 font-bold">${amrap.weight}×${amrap.actualReps}</div>
+                <div class="text-[10px] uppercase tracking-wider text-neutral-500">${h.mainLift || ""}</div>
+              </div>` : ""}
+            </div>
+          </div>`;
+      };
+
+      const histBlock = (s.history || []).length === 0 ? `
+        <div class="bg-neutral-950 border border-neutral-800 rounded-xl p-6 text-center text-neutral-500 text-sm">No sessions logged yet.</div>` :
+        `<div class="space-y-2">${(s.history || []).slice(0, 30).map(histItem).join("")}</div>`;
+
+      const doneBlock = Object.keys(DAY_NAMES).map((d) => {
+        const done = s.completedThisWeek && s.completedThisWeek[d];
+        return `
+          <div class="flex-1 text-center py-2 rounded-lg border ${done ? "bg-green-950/30 border-green-900/40 text-green-300" : "bg-neutral-950 border-neutral-800 text-neutral-500"}">
+            <div class="text-[10px] uppercase tracking-wider">${DAY_NAMES[d]}</div>
+            <div class="text-xs font-bold mt-0.5">${done ? "DONE" : "—"}</div>
+          </div>`;
+      }).join("");
+
+      root.innerHTML = `
+        <div class="flex items-center gap-2.5 mb-1">
+          <div class="w-9 h-9 bg-orange-500 rounded-lg flex items-center justify-center text-black font-bold">IL</div>
+          <div>
+            <div class="font-display text-2xl tracking-wider leading-none">IRON LOG</div>
+            <div class="text-[10px] uppercase tracking-widest text-neutral-500 font-mono mt-1">COACH VIEW · READ ONLY</div>
+          </div>
+        </div>
+
+        <div class="flex items-center gap-3 my-6">
+          <div class="text-xs uppercase tracking-[0.2em] text-neutral-500 font-mono">CYCLE ${s.cycle} · WEEK ${s.week} OF 4</div>
+          <div class="flex-1 h-px bg-neutral-800"></div>
+          <div class="text-xs uppercase tracking-[0.2em] font-mono text-orange-400">${WEEK_LABELS[s.week] || ""}</div>
+        </div>
+
+        <div class="text-xs uppercase tracking-[0.2em] text-neutral-500 font-mono mb-2">THIS WEEK</div>
+        <div class="flex gap-2 mb-6">${doneBlock}</div>
+
+        <div class="text-xs uppercase tracking-[0.2em] text-neutral-500 font-mono mb-2">TRAINING MAXES</div>
+        <div class="grid grid-cols-3 gap-2 mb-6">
+          ${tmBox("Bench", tm.bench, benchE)}
+          ${tmBox("Squat", tm.squat, squatE)}
+          ${tmBox("Deadlift", tm.deadlift, dlE)}
+        </div>
+
+        <div class="text-xs uppercase tracking-[0.2em] text-neutral-500 font-mono mb-2">CURRENT ACCESSORY WEIGHTS</div>
+        <div class="bg-neutral-950 border border-neutral-800 rounded-xl p-4 mb-6">${accBlock}</div>
+
+        <div class="text-xs uppercase tracking-[0.2em] text-neutral-500 font-mono mb-2">RECENT SESSIONS</div>
+        ${histBlock}`;
+    };
+
+    (async () => {
+      const t = tokenFromPath();
+      if (!t) { renderError("Share link is missing its token."); return; }
+      try {
+        const r = await fetch(`/api/share?t=${encodeURIComponent(t)}`);
+        if (r.status === 404) { renderError("This share link isn't valid (or was revoked)."); return; }
+        if (!r.ok) { renderError("Server error: " + r.status); return; }
+        const data = await r.json();
+        if (!data || !data.state) { renderError("No data yet."); return; }
+        render(data.state);
+      } catch (e) {
+        renderError("Network error.");
+      }
+    })();
+  </script>
+</body>
+</html>

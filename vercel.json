@@ -2,5 +2,8 @@
   "buildCommand": "echo skip",
   "installCommand": "echo skip",
   "outputDirectory": ".",
-  "framework": null
+  "framework": null,
+  "rewrites": [
+    { "source": "/share/:token", "destination": "/share.html" }
+  ]
 }
