@@ -1,0 +1,809 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+  <title>Iron Log</title>
+
+  <!-- PWA / iOS Home Screen -->
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-title" content="Iron Log" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="theme-color" content="#000000" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <link rel="manifest" href="/manifest.json" />
+  <link rel="apple-touch-icon" href="data:image/svg+xml;utf8,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%20180%20180'%3E%3Crect%20width='180'%20height='180'%20rx='40'%20fill='%23000'/%3E%3Crect%20x='34'%20y='34'%20width='112'%20height='112'%20rx='24'%20fill='%23F97316'/%3E%3Cpath%20d='M70%2070l40%2040M120%20120l5%205M55%2055l5%205M105%20130l20-20M55%2070l20-20M60%2080l35-35M125%20120l35-35'%20stroke='%23000'%20stroke-width='10'%20stroke-linecap='round'%20fill='none'/%3E%3C/svg%3E" />
+
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Anton&family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+
+  <!-- Tailwind -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- React -->
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <style>
+    html, body {
+      background: #000;
+      color: #fafafa;
+      font-family: 'Outfit', system-ui, -apple-system, sans-serif;
+      overscroll-behavior-y: none;
+      -webkit-tap-highlight-color: transparent;
+    }
+    body {
+      padding-top: env(safe-area-inset-top);
+      padding-bottom: env(safe-area-inset-bottom);
+    }
+    .font-display { font-family: 'Anton', sans-serif; font-weight: 400; }
+    .font-mono { font-family: 'JetBrains Mono', monospace; }
+    input[type=number]::-webkit-inner-spin-button,
+    input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+    input[type=number] { -moz-appearance: textfield; }
+    button { -webkit-tap-highlight-color: transparent; }
+    /* Initial loader */
+    #loader {
+      position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+      background: #000; color: #525252; font-family: 'JetBrains Mono', monospace;
+      font-size: 12px; letter-spacing: 0.2em; text-transform: uppercase;
+      z-index: 100;
+    }
+    #loader.hide { display: none; }
+  </style>
+</head>
+<body>
+  <div id="loader">Loading…</div>
+  <div id="root"></div>
+
+  <script type="text/babel" data-presets="env,react">
+    const { useState, useEffect } = React;
+
+    // ============================================================
+    // ICONS (inline SVG, mimics lucide)
+    // ============================================================
+    const Icon = ({ children, size = 18, strokeWidth = 2, className = '' }) => (
+      <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24"
+        fill="none" stroke="currentColor" strokeWidth={strokeWidth}
+        strokeLinecap="round" strokeLinejoin="round" className={className}>
+        {children}
+      </svg>
+    );
+
+    const Dumbbell = (p) => <Icon {...p}>
+      <path d="M14.4 14.4 9.6 9.6"/>
+      <path d="M18.657 21.485a2 2 0 1 1-2.829-2.828l-1.767 1.768a2 2 0 1 1-2.829-2.829l6.364-6.364a2 2 0 1 1 2.829 2.829l-1.768 1.767a2 2 0 1 1 2.828 2.829z"/>
+      <path d="m21.5 21.5-1.4-1.4"/>
+      <path d="M3.9 3.9 2.5 2.5"/>
+      <path d="M6.404 12.768a2 2 0 1 1-2.829-2.829l1.768-1.767a2 2 0 1 1-2.828-2.829l2.828-2.828a2 2 0 1 1 2.829 2.828l1.767-1.768a2 2 0 1 1 2.829 2.829z"/>
+    </Icon>;
+    const Check = (p) => <Icon {...p}><polyline points="20 6 9 17 4 12"/></Icon>;
+    const ChevronRight = (p) => <Icon {...p}><polyline points="9 18 15 12 9 6"/></Icon>;
+    const ChevronLeft = (p) => <Icon {...p}><polyline points="15 18 9 12 15 6"/></Icon>;
+    const Plus = (p) => <Icon {...p}><path d="M5 12h14"/><path d="M12 5v14"/></Icon>;
+    const Minus = (p) => <Icon {...p}><path d="M5 12h14"/></Icon>;
+    const Flame = (p) => <Icon {...p}><path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"/></Icon>;
+    const ArrowUp = (p) => <Icon {...p}><path d="M12 19V5"/><path d="m5 12 7-7 7 7"/></Icon>;
+    const ArrowRight = (p) => <Icon {...p}><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></Icon>;
+    const RotateCcw = (p) => <Icon {...p}><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></Icon>;
+    const TrendingUp = (p) => <Icon {...p}><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></Icon>;
+    const Award = (p) => <Icon {...p}><circle cx="12" cy="8" r="6"/><path d="m15.477 12.89 1.515 8.526a.5.5 0 0 1-.81.47l-3.58-2.687a1 1 0 0 0-1.197 0l-3.586 2.686a.5.5 0 0 1-.81-.469l1.514-8.526"/></Icon>;
+    const Calendar = (p) => <Icon {...p}><rect width="18" height="18" x="3" y="4" rx="2" ry="2"/><line x1="16" x2="16" y1="2" y2="6"/><line x1="8" x2="8" y1="2" y2="6"/><line x1="3" x2="21" y1="10" y2="10"/></Icon>;
+    const History = (p) => <Icon {...p}><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/></Icon>;
+    const Settings = (p) => <Icon {...p}><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></Icon>;
+
+    // ============================================================
+    // PROGRAM DEFINITIONS
+    // ============================================================
+    const round5 = (n) => Math.round(n / 5) * 5;
+
+    const WEEK_SCHEMES = {
+      1: { label: '5s WEEK', sets: [
+        { pct: 0.65, reps: 5, isAmrap: false },
+        { pct: 0.75, reps: 5, isAmrap: false },
+        { pct: 0.85, reps: 5, isAmrap: true, minReps: 5 },
+      ]},
+      2: { label: '3s WEEK', sets: [
+        { pct: 0.70, reps: 3, isAmrap: false },
+        { pct: 0.80, reps: 3, isAmrap: false },
+        { pct: 0.90, reps: 3, isAmrap: true, minReps: 3 },
+      ]},
+      3: { label: 'PR WEEK', sets: [
+        { pct: 0.75, reps: 5, isAmrap: false },
+        { pct: 0.85, reps: 3, isAmrap: false },
+        { pct: 0.95, reps: 1, isAmrap: true, minReps: 1 },
+      ]},
+      4: { label: 'DELOAD', sets: [
+        { pct: 0.40, reps: 5, isAmrap: false },
+        { pct: 0.50, reps: 5, isAmrap: false },
+        { pct: 0.60, reps: 5, isAmrap: false },
+      ]},
+    };
+
+    const ACCESSORIES = {
+      'incline-db':       { name: 'Incline Dumbbell Press', sets: 3, repsLow: 8,  repsHigh: 10, inc: 5,  startWeight: 50 },
+      'close-grip':       { name: 'Close-Grip Bench Press', sets: 3, repsLow: 6,  repsHigh: 8,  inc: 5,  startWeight: 135 },
+      'tricep-pushdowns': { name: 'Tricep Pushdowns',       sets: 3, repsLow: 10, repsHigh: 12, inc: 5,  startWeight: 50 },
+      'db-rows':          { name: 'Dumbbell Rows',          sets: 3, repsLow: 8,  repsHigh: 10, inc: 5,  startWeight: 60 },
+      'goblet-squat':     { name: 'Goblet Squat',           sets: 3, repsLow: 8,  repsHigh: 10, inc: 5,  startWeight: 50 },
+      'lat-pulldown':     { name: 'Lat Pulldown',           sets: 3, repsLow: 8,  repsHigh: 10, inc: 5,  startWeight: 120 },
+      'db-ohp':           { name: 'Dumbbell Overhead Press',sets: 3, repsLow: 8,  repsHigh: 10, inc: 5,  startWeight: 35 },
+      'plank':            { name: 'Plank',                  sets: 3, repsLow: 30, repsHigh: 60, inc: 0,  startWeight: 0, isTimed: true },
+      'romanian-dl':      { name: 'Romanian Deadlift',      sets: 3, repsLow: 8,  repsHigh: 10, inc: 10, startWeight: 135 },
+      'leg-press':        { name: 'Leg Press',              sets: 3, repsLow: 10, repsHigh: 12, inc: 10, startWeight: 200 },
+      'leg-curls':        { name: 'Lying Leg Curls',        sets: 3, repsLow: 10, repsHigh: 12, inc: 5,  startWeight: 80 },
+      'calf-raises':      { name: 'Standing Calf Raises',   sets: 3, repsLow: 12, repsHigh: 15, inc: 10, startWeight: 100 },
+      'leg-raises':       { name: 'Hanging Leg Raises',     sets: 3, repsLow: 10, repsHigh: 15, inc: 0,  startWeight: 0, isBodyweight: true },
+      'pull-ups':         { name: 'Pull-Ups',               sets: 3, repsLow: 5,  repsHigh: 10, inc: 0,  startWeight: 0, isBodyweight: true },
+      'barbell-rows':     { name: 'Barbell Rows',           sets: 3, repsLow: 8,  repsHigh: 10, inc: 5,  startWeight: 135 },
+      'lat-pulldown-back':{ name: 'Lat Pulldown',           sets: 3, repsLow: 10, repsHigh: 12, inc: 5,  startWeight: 120 },
+      'face-pulls':       { name: 'Face Pulls',             sets: 3, repsLow: 12, repsHigh: 15, inc: 5,  startWeight: 40 },
+      'bicep-curls':      { name: 'Dumbbell Bicep Curls',   sets: 3, repsLow: 10, repsHigh: 12, inc: 5,  startWeight: 25 },
+    };
+
+    const DAY_TEMPLATES = {
+      chest:    { id: 'chest',    name: 'Chest Day',     mainLift: 'bench',    mainName: 'Bench Press',          isVolume: false, accessories: ['incline-db', 'close-grip', 'tricep-pushdowns', 'db-rows'] },
+      fullbody: { id: 'fullbody', name: 'Full Body Day', mainLift: 'bench',    mainName: 'Bench Press (Volume)', isVolume: true,  accessories: ['goblet-squat', 'lat-pulldown', 'db-ohp', 'plank'] },
+      legs:     { id: 'legs',     name: 'Leg Day',       mainLift: 'squat',    mainName: 'Back Squat',           isVolume: false, accessories: ['romanian-dl', 'leg-press', 'leg-curls', 'calf-raises', 'leg-raises'] },
+      back:     { id: 'back',     name: 'Back Day',      mainLift: 'deadlift', mainName: 'Deadlift',             isVolume: false, accessories: ['pull-ups', 'barbell-rows', 'lat-pulldown-back', 'face-pulls', 'bicep-curls'] },
+    };
+    const DAY_ORDER = ['chest', 'fullbody', 'legs', 'back'];
+
+    // ============================================================
+    // SESSION BUILDING
+    // ============================================================
+    const buildMainSets = (tm, week, isVolume) => {
+      if (isVolume) {
+        const isDeload = week === 4;
+        const pct = isDeload ? 0.50 : 0.60;
+        const count = isDeload ? 3 : 5;
+        const w = round5(tm * pct);
+        return Array.from({ length: count }, (_, i) => ({
+          id: `main-${i}`, weight: w, targetReps: 5, isAmrap: false, completed: false, actualReps: null
+        }));
+      }
+      return WEEK_SCHEMES[week].sets.map((s, i) => ({
+        id: `main-${i}`, weight: round5(tm * s.pct), targetReps: s.reps,
+        isAmrap: s.isAmrap, minReps: s.minReps, completed: false, actualReps: null
+      }));
+    };
+
+    const buildAccessory = (id, log) => {
+      const def = ACCESSORIES[id];
+      const last = log[id] || { weight: def.startWeight, hitTopOnAllSets: false };
+      const suggested = last.hitTopOnAllSets ? last.weight + def.inc : last.weight;
+      return {
+        id, name: def.name, sets: def.sets, repsLow: def.repsLow, repsHigh: def.repsHigh, inc: def.inc,
+        isTimed: def.isTimed, isBodyweight: def.isBodyweight,
+        weight: suggested, lastWeight: last.weight,
+        progressionHint: last.hitTopOnAllSets ? `+${def.inc} lb from last time` : null,
+        setData: Array.from({ length: def.sets }, (_, i) => ({ id: `${id}-${i}`, reps: null, completed: false })),
+      };
+    };
+
+    const buildSession = (dayId, state) => {
+      const tpl = DAY_TEMPLATES[dayId];
+      const tm = state.trainingMaxes[tpl.mainLift];
+      return {
+        dayId, name: tpl.name, cycle: state.cycle, week: state.week,
+        weekLabel: WEEK_SCHEMES[state.week].label,
+        mainLift: tpl.mainLift, mainName: tpl.mainName, isVolume: tpl.isVolume,
+        mainSets: buildMainSets(tm, state.week, tpl.isVolume),
+        accessories: tpl.accessories.map(id => buildAccessory(id, state.accessoryLog)),
+      };
+    };
+
+    // ============================================================
+    // PROGRESSION
+    // ============================================================
+    const finishSession = (state, completed) => {
+      const newLog = { ...state.accessoryLog };
+      completed.accessories.forEach(acc => {
+        const def = ACCESSORIES[acc.id];
+        const reps = acc.setData.map(s => s.reps).filter(r => r != null);
+        const hitTop = reps.length === acc.sets && reps.every(r => r >= def.repsHigh);
+        newLog[acc.id] = { weight: acc.weight, hitTopOnAllSets: hitTop, lastReps: reps };
+      });
+      const done = { ...state.completedThisWeek, [completed.dayId]: true };
+      let { cycle, week, trainingMaxes } = state;
+      let newDone = done;
+      if (Object.values(done).every(v => v)) {
+        newDone = { chest: false, fullbody: false, legs: false, back: false };
+        if (week === 4) {
+          week = 1; cycle += 1;
+          trainingMaxes = { bench: trainingMaxes.bench + 5, squat: trainingMaxes.squat + 10, deadlift: trainingMaxes.deadlift + 10 };
+        } else week += 1;
+      }
+      const newHistory = [{ ...completed, completedAt: new Date().toISOString() }, ...(state.history || [])].slice(0, 200);
+      return { ...state, cycle, week, trainingMaxes, accessoryLog: newLog, completedThisWeek: newDone, history: newHistory, activeSession: null };
+    };
+
+    const estimate1RM = (w, r) => (!w || !r) ? null : Math.round(w * (1 + r / 30));
+    const getBestE1RM = (history, lift) => {
+      if (!history) return null;
+      let best = 0;
+      history.forEach(s => {
+        if (s.mainLift !== lift || s.isVolume) return;
+        s.mainSets?.forEach(set => {
+          if (set.isAmrap && set.actualReps && set.weight) {
+            const e = estimate1RM(set.weight, set.actualReps);
+            if (e > best) best = e;
+          }
+        });
+      });
+      return best || null;
+    };
+
+    // ============================================================
+    // STORAGE (localStorage)
+    // ============================================================
+    const STORAGE_KEY = 'iron-log:v2';
+    const defaultState = {
+      trainingMaxes: { bench: 230, squat: 250, deadlift: 295 },
+      cycle: 1, week: 1,
+      completedThisWeek: { chest: false, fullbody: false, legs: false, back: false },
+      accessoryLog: {}, history: [], activeSession: null,
+    };
+    const loadState = () => {
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (raw) return { ...defaultState, ...JSON.parse(raw) };
+      } catch (e) {}
+      return defaultState;
+    };
+    const saveState = (s) => {
+      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(s)); } catch (e) { console.error(e); }
+    };
+
+    // ============================================================
+    // SHARED REP PROMPT MODAL
+    // ============================================================
+    const RepPrompt = ({ open, title, subtitle, defaultValue, onCancel, onSubmit }) => {
+      const [val, setVal] = useState(defaultValue?.toString() ?? '');
+      useEffect(() => { if (open) setVal(defaultValue?.toString() ?? ''); }, [open, defaultValue]);
+      if (!open) return null;
+      const submit = () => {
+        const n = parseInt(val, 10);
+        if (!isNaN(n) && n >= 0) onSubmit(n);
+      };
+      return (
+        <div className="fixed inset-0 bg-black/85 z-50 flex items-center justify-center p-6" onClick={onCancel}>
+          <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-6 w-full max-w-sm" onClick={(e) => e.stopPropagation()}>
+            <div className="text-xs uppercase tracking-widest text-orange-400 font-semibold mb-2">{title}</div>
+            <div className="text-sm text-neutral-400 mb-4">{subtitle}</div>
+            <input type="number" autoFocus inputMode="numeric" value={val}
+              onChange={(e) => setVal(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && submit()}
+              className="w-full bg-neutral-900 border-2 border-neutral-800 focus:border-orange-500 rounded-lg px-4 py-4 text-4xl font-mono font-bold text-center text-neutral-50 outline-none"
+              placeholder="0" />
+            <div className="flex gap-2 mt-4">
+              <button onClick={onCancel} className="flex-1 py-3 rounded-lg border border-neutral-800 text-neutral-400 uppercase tracking-wider text-sm font-semibold hover:bg-neutral-900">Cancel</button>
+              <button onClick={submit} className="flex-1 py-3 rounded-lg bg-orange-500 text-black uppercase tracking-wider text-sm font-bold hover:bg-orange-400">Log</button>
+            </div>
+          </div>
+        </div>
+      );
+    };
+
+    // ============================================================
+    // MAIN SET ROW
+    // ============================================================
+    const MainSetRow = ({ set, idx, onToggle, onAmrap }) => {
+      const [showPrompt, setShowPrompt] = useState(false);
+      const handleClick = () => {
+        if (set.isAmrap && !set.completed) setShowPrompt(true);
+        else onToggle();
+      };
+      return (
+        <>
+          <div
+            className={`flex items-center justify-between px-4 py-4 rounded-lg border transition-all cursor-pointer select-none ${
+              set.completed ? 'bg-orange-500/10 border-orange-500/40' : 'bg-neutral-900 border-neutral-800 hover:border-neutral-700 active:scale-[0.99]'
+            }`}
+            onClick={handleClick}>
+            <div className="flex items-center gap-4">
+              <div className={`w-9 h-9 rounded-full border-2 flex items-center justify-center font-mono text-sm shrink-0 ${
+                set.completed ? 'bg-orange-500 border-orange-500 text-black' : 'border-neutral-700 text-neutral-500'
+              }`}>
+                {set.completed ? <Check size={16} strokeWidth={3} /> : idx + 1}
+              </div>
+              <div>
+                <div className="font-mono text-2xl font-bold text-neutral-50 leading-none">
+                  {set.weight}<span className="text-neutral-500 text-base font-normal ml-1">lb</span>
+                </div>
+                <div className="text-xs uppercase tracking-wider text-neutral-500 mt-1">
+                  {set.isAmrap
+                    ? set.completed ? `${set.actualReps} reps logged` : `${set.targetReps}+ reps · tap to log`
+                    : `${set.targetReps} reps`}
+                </div>
+              </div>
+            </div>
+            {set.isAmrap && !set.completed && (
+              <div className="text-xs uppercase tracking-wider text-orange-400 font-semibold flex items-center gap-1">
+                <Flame size={14} /> AMRAP
+              </div>
+            )}
+          </div>
+          <RepPrompt open={showPrompt} title="AMRAP Set"
+            subtitle={`${set.weight} lb · target ${set.targetReps}+ reps`}
+            defaultValue={set.targetReps}
+            onCancel={() => setShowPrompt(false)}
+            onSubmit={(n) => { onAmrap(n); setShowPrompt(false); }} />
+        </>
+      );
+    };
+
+    // ============================================================
+    // ACCESSORY CARD
+    // ============================================================
+    const AccessoryCard = ({ ex, onUpdate }) => {
+      const [promptIdx, setPromptIdx] = useState(null);
+
+      const adjustWeight = (d) => {
+        if (ex.isBodyweight) return;
+        onUpdate({ ...ex, weight: Math.max(0, ex.weight + d) });
+      };
+      const logSet = (idx, reps) => {
+        const setData = ex.setData.map((s, i) => i === idx ? { ...s, reps, completed: true } : s);
+        onUpdate({ ...ex, setData });
+        setPromptIdx(null);
+      };
+      const toggleSet = (idx) => {
+        const set = ex.setData[idx];
+        if (set.completed) {
+          const setData = ex.setData.map((s, i) => i === idx ? { ...s, reps: null, completed: false } : s);
+          onUpdate({ ...ex, setData });
+        } else setPromptIdx(idx);
+      };
+
+      const repLabel = ex.isTimed ? `${ex.repsLow}-${ex.repsHigh} seconds` : `${ex.repsLow}-${ex.repsHigh} reps`;
+
+      return (
+        <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-4">
+          <div className="flex items-start justify-between mb-3 gap-3">
+            <div className="min-w-0">
+              <div className="text-base font-bold text-neutral-50 tracking-tight">{ex.name}</div>
+              <div className="text-xs uppercase tracking-wider text-neutral-500 font-mono mt-0.5">
+                {ex.sets} sets × {repLabel}
+              </div>
+            </div>
+            {ex.progressionHint && (
+              <div className="text-[10px] uppercase tracking-wider text-green-400 font-semibold flex items-center gap-1 bg-green-950/40 px-2 py-1 rounded shrink-0">
+                <ArrowUp size={10} strokeWidth={3} /> {ex.progressionHint}
+              </div>
+            )}
+          </div>
+
+          {!ex.isBodyweight && !ex.isTimed && (
+            <div className="flex items-center gap-2 mb-3">
+              <button onClick={() => adjustWeight(-ex.inc)} className="w-10 h-12 rounded-lg bg-neutral-900 border border-neutral-800 flex items-center justify-center text-neutral-300 hover:bg-neutral-800 active:scale-95">
+                <Minus size={16} />
+              </button>
+              <div className="flex-1 h-12 bg-neutral-900 border border-neutral-800 rounded-lg flex items-center justify-center">
+                <span className="font-mono text-2xl font-bold text-neutral-50">{ex.weight}</span>
+                <span className="text-neutral-500 text-sm font-normal ml-1">lb</span>
+              </div>
+              <button onClick={() => adjustWeight(ex.inc)} className="w-10 h-12 rounded-lg bg-neutral-900 border border-neutral-800 flex items-center justify-center text-neutral-300 hover:bg-neutral-800 active:scale-95">
+                <Plus size={16} />
+              </button>
+            </div>
+          )}
+          {ex.isBodyweight && (
+            <div className="mb-3 px-3 py-2 bg-neutral-900 border border-neutral-800 rounded-lg text-center text-xs uppercase tracking-wider text-neutral-400 font-mono">
+              Bodyweight
+            </div>
+          )}
+
+          <div className="grid grid-cols-3 gap-2">
+            {ex.setData.map((set, i) => (
+              <button key={set.id} onClick={() => toggleSet(i)}
+                className={`py-3 rounded-lg border transition-all flex flex-col items-center justify-center gap-0.5 active:scale-[0.97] ${
+                  set.completed ? 'bg-orange-500/10 border-orange-500/40 text-orange-200' : 'bg-neutral-900 border-neutral-800 text-neutral-500 hover:border-neutral-700'
+                }`}>
+                <div className="text-[10px] uppercase tracking-wider">Set {i + 1}</div>
+                <div className="font-mono text-lg font-bold leading-none">{set.completed ? set.reps : '—'}</div>
+                <div className="text-[10px] uppercase tracking-wider">{set.completed ? (ex.isTimed ? 'sec' : 'reps') : 'tap'}</div>
+              </button>
+            ))}
+          </div>
+
+          <RepPrompt open={promptIdx !== null}
+            title={ex.isTimed ? 'Log Time' : 'Log Reps'}
+            subtitle={`${ex.name} · Set ${(promptIdx ?? 0) + 1} · target ${repLabel}`}
+            defaultValue={ex.repsHigh}
+            onCancel={() => setPromptIdx(null)}
+            onSubmit={(n) => logSet(promptIdx, n)} />
+        </div>
+      );
+    };
+
+    // ============================================================
+    // STAT BOX
+    // ============================================================
+    const StatBox = ({ label, value, best }) => (
+      <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-3">
+        <div className="text-[10px] uppercase tracking-wider text-neutral-500 mb-1">{label}</div>
+        <div className="font-mono text-xl font-bold text-neutral-50 leading-none">
+          {value}<span className="text-neutral-500 text-xs ml-0.5 font-normal">lb</span>
+        </div>
+        {best && <div className="text-[10px] text-neutral-500 mt-1 font-mono">est 1RM: {best}</div>}
+      </div>
+    );
+
+    // ============================================================
+    // HOME VIEW
+    // ============================================================
+    const HomeView = ({ state, onStart, onHistory, onSettings }) => {
+      const total = state.history?.length || 0;
+      const benchE = getBestE1RM(state.history, 'bench');
+      const squatE = getBestE1RM(state.history, 'squat');
+      const dlE = getBestE1RM(state.history, 'deadlift');
+
+      return (
+        <div className="px-5 pb-24 pt-8 max-w-2xl mx-auto">
+          <div className="flex items-center justify-between mb-8">
+            <div className="flex items-center gap-2.5">
+              <div className="w-10 h-10 bg-orange-500 rounded-lg flex items-center justify-center">
+                <Dumbbell size={22} strokeWidth={2.5} className="text-black" />
+              </div>
+              <div>
+                <div className="font-display text-2xl tracking-wider leading-none">IRON LOG</div>
+                <div className="text-[10px] uppercase tracking-widest text-neutral-500 font-mono mt-1">4-DAY STRENGTH</div>
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <button onClick={onHistory} className="w-10 h-10 rounded-lg border border-neutral-800 flex items-center justify-center text-neutral-400 hover:text-neutral-100 hover:border-neutral-700">
+                <History size={18} />
+              </button>
+              <button onClick={onSettings} className="w-10 h-10 rounded-lg border border-neutral-800 flex items-center justify-center text-neutral-400 hover:text-neutral-100 hover:border-neutral-700">
+                <Settings size={18} />
+              </button>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3 mb-6">
+            <div className="text-xs uppercase tracking-[0.2em] text-neutral-500 font-mono">
+              CYCLE {state.cycle} · WEEK {state.week} OF 4
+            </div>
+            <div className="flex-1 h-px bg-neutral-800" />
+            <div className="text-xs uppercase tracking-[0.2em] font-mono text-orange-400">
+              {WEEK_SCHEMES[state.week].label}
+            </div>
+          </div>
+
+          <div className="text-xs uppercase tracking-[0.2em] text-neutral-500 font-mono mb-3">THIS WEEK</div>
+          <div className="grid grid-cols-2 gap-3 mb-6">
+            {DAY_ORDER.map(dayId => {
+              const tpl = DAY_TEMPLATES[dayId];
+              const done = state.completedThisWeek[dayId];
+              return (
+                <button key={dayId} onClick={() => onStart(dayId)}
+                  className={`relative text-left p-4 rounded-xl border transition-all active:scale-[0.98] ${
+                    done ? 'bg-neutral-950 border-green-900/40' : 'bg-gradient-to-br from-neutral-950 to-neutral-900 border-neutral-800 hover:border-orange-500/50'
+                  }`}>
+                  {done && (
+                    <div className="absolute top-3 right-3 w-6 h-6 rounded-full bg-green-500/20 border border-green-500/40 flex items-center justify-center">
+                      <Check size={12} className="text-green-400" strokeWidth={3} />
+                    </div>
+                  )}
+                  <div className="font-display text-2xl tracking-wide leading-none mb-2 text-neutral-50">
+                    {tpl.name.split(' ')[0].toUpperCase()}
+                  </div>
+                  <div className="text-[10px] uppercase tracking-wider text-neutral-500 font-mono">{tpl.mainName}</div>
+                  {!done && (
+                    <div className="mt-3 text-xs uppercase tracking-wider text-orange-400 font-semibold flex items-center gap-1">
+                      Start <ArrowRight size={12} strokeWidth={3} />
+                    </div>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="text-xs uppercase tracking-[0.2em] text-neutral-500 font-mono mb-3">TRAINING MAXES</div>
+          <div className="grid grid-cols-3 gap-2 mb-4">
+            <StatBox label="Bench" value={state.trainingMaxes.bench} best={benchE} />
+            <StatBox label="Squat" value={state.trainingMaxes.squat} best={squatE} />
+            <StatBox label="Deadlift" value={state.trainingMaxes.deadlift} best={dlE} />
+          </div>
+
+          <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-4 flex items-center gap-3">
+            <div className="w-10 h-10 rounded-lg bg-orange-500/10 border border-orange-500/30 flex items-center justify-center">
+              <Award size={18} className="text-orange-400" />
+            </div>
+            <div className="flex-1">
+              <div className="text-xs uppercase tracking-wider text-neutral-500">Sessions Logged</div>
+              <div className="font-mono text-2xl font-bold text-neutral-50">{total}</div>
+            </div>
+          </div>
+        </div>
+      );
+    };
+
+    // ============================================================
+    // SESSION VIEW
+    // ============================================================
+    const SessionView = ({ state, dayId, onComplete, onCancel, onUpdateState }) => {
+      const [session, setSession] = useState(() => {
+        if (state.activeSession && state.activeSession.dayId === dayId) return state.activeSession;
+        return buildSession(dayId, state);
+      });
+
+      useEffect(() => { onUpdateState({ ...state, activeSession: session }); }, [session]);
+
+      const toggleMain = (id) => setSession(p => ({ ...p, mainSets: p.mainSets.map(s => s.id === id ? { ...s, completed: !s.completed } : s) }));
+      const logAmrap = (id, reps) => setSession(p => ({ ...p, mainSets: p.mainSets.map(s => s.id === id ? { ...s, completed: true, actualReps: reps } : s) }));
+      const updateAcc = (acc) => setSession(p => ({ ...p, accessories: p.accessories.map(a => a.id === acc.id ? acc : a) }));
+
+      const mainTotal = session.mainSets.length;
+      const mainDone = session.mainSets.filter(s => s.completed).length;
+      const accTotal = session.accessories.reduce((s, a) => s + a.setData.length, 0);
+      const accDone = session.accessories.reduce((s, a) => s + a.setData.filter(x => x.completed).length, 0);
+      const totalDone = mainDone + accDone;
+      const totalSets = mainTotal + accTotal;
+      const progress = totalSets ? (totalDone / totalSets) * 100 : 0;
+      const mainComplete = mainDone === mainTotal;
+
+      return (
+        <div className="px-5 pb-32 pt-6 max-w-2xl mx-auto">
+          <div className="flex items-center justify-between mb-6">
+            <button onClick={onCancel} className="flex items-center gap-1 text-neutral-400 hover:text-neutral-100 text-sm uppercase tracking-wider">
+              <ChevronLeft size={18} /> Back
+            </button>
+            <div className="text-xs uppercase tracking-[0.2em] font-mono text-neutral-500">
+              C{session.cycle} · W{session.week} · {session.weekLabel}
+            </div>
+          </div>
+
+          <div className="font-display text-4xl tracking-wide text-neutral-50 mb-1">{session.name.toUpperCase()}</div>
+          <div className="text-sm text-neutral-500 mb-6">
+            {session.isVolume ? 'Volume bench + supporting lifts' : 'Main lift + accessories'}
+          </div>
+
+          <div className="mb-6">
+            <div className="flex justify-between text-xs font-mono text-neutral-500 mb-2">
+              <span>{totalDone}/{totalSets} SETS</span><span>{Math.round(progress)}%</span>
+            </div>
+            <div className="h-1.5 bg-neutral-900 rounded-full overflow-hidden">
+              <div className="h-full bg-orange-500 transition-all duration-300" style={{ width: `${progress}%` }} />
+            </div>
+          </div>
+
+          <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-4 md:p-5 mb-4">
+            <div className="mb-4">
+              <div className="text-[10px] uppercase tracking-widest text-orange-400 font-semibold mb-1">MAIN LIFT</div>
+              <div className="text-xl font-bold text-neutral-50 tracking-tight">{session.mainName}</div>
+              {session.isVolume && <div className="text-xs text-neutral-500 mt-1">Lighter weight, focus on speed and form</div>}
+            </div>
+            <div className="space-y-2">
+              {session.mainSets.map((set, i) => (
+                <MainSetRow key={set.id} set={set} idx={i}
+                  onToggle={() => toggleMain(set.id)}
+                  onAmrap={(reps) => logAmrap(set.id, reps)} />
+              ))}
+            </div>
+          </div>
+
+          <div className="text-[10px] uppercase tracking-widest text-neutral-500 font-mono mb-3">ACCESSORIES</div>
+          <div className="space-y-3">
+            {session.accessories.map(acc => (
+              <AccessoryCard key={acc.id} ex={acc} onUpdate={updateAcc} />
+            ))}
+          </div>
+
+          <div className="fixed bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-black via-black/95 to-transparent" style={{ paddingBottom: 'calc(1rem + env(safe-area-inset-bottom))' }}>
+            <div className="max-w-2xl mx-auto">
+              <button onClick={() => onComplete(session)} disabled={!mainComplete}
+                className={`w-full py-5 rounded-xl font-bold uppercase tracking-[0.15em] text-sm transition-all ${
+                  mainComplete ? 'bg-orange-500 hover:bg-orange-400 text-black active:scale-[0.99]' : 'bg-neutral-900 text-neutral-600 cursor-not-allowed'
+                }`}>
+                {totalDone === totalSets ? 'Finish Workout' : mainComplete ? 'Log Workout' : 'Finish Main Lift First'}
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    };
+
+    // ============================================================
+    // HISTORY VIEW
+    // ============================================================
+    const HistoryView = ({ state, onBack }) => {
+      const [filter, setFilter] = useState('all');
+      const history = state.history || [];
+      const filtered = filter === 'all' ? history : history.filter(s => s.dayId === filter);
+
+      return (
+        <div className="px-5 pb-24 pt-6 max-w-2xl mx-auto">
+          <button onClick={onBack} className="flex items-center gap-1 text-neutral-400 hover:text-neutral-100 text-sm uppercase tracking-wider mb-6">
+            <ChevronLeft size={18} /> Back
+          </button>
+          <div className="font-display text-3xl tracking-wide text-neutral-50 mb-6">HISTORY</div>
+          <div className="flex gap-2 mb-6 flex-wrap">
+            {['all', ...DAY_ORDER].map(f => (
+              <button key={f} onClick={() => setFilter(f)}
+                className={`px-3 py-1.5 rounded-lg text-xs uppercase tracking-wider font-mono border transition-all ${
+                  filter === f ? 'bg-orange-500 text-black border-orange-500 font-bold' : 'bg-neutral-950 text-neutral-400 border-neutral-800 hover:border-neutral-700'
+                }`}>
+                {f === 'all' ? 'All' : DAY_TEMPLATES[f].name.split(' ')[0]}
+              </button>
+            ))}
+          </div>
+          {filtered.length === 0 ? (
+            <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-8 text-center">
+              <div className="text-neutral-500 text-sm">No sessions yet.</div>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {filtered.map((s, i) => {
+                const amrap = s.mainSets?.find(set => set.isAmrap && set.actualReps);
+                return (
+                  <div key={i} className="bg-neutral-950 border border-neutral-800 rounded-lg p-4">
+                    <div className="flex items-start justify-between mb-1">
+                      <div>
+                        <div className="font-semibold text-neutral-50">{s.name}</div>
+                        <div className="text-xs text-neutral-500 font-mono">
+                          C{s.cycle}·W{s.week} · {new Date(s.completedAt).toLocaleDateString()}
+                        </div>
+                      </div>
+                      {amrap && (
+                        <div className="text-right">
+                          <div className="font-mono text-orange-400 font-bold">{amrap.weight}×{amrap.actualReps}</div>
+                          <div className="text-[10px] uppercase tracking-wider text-neutral-500">{s.mainLift}</div>
+                        </div>
+                      )}
+                    </div>
+                    <div className="text-xs text-neutral-500 mt-2">
+                      {s.accessories?.length || 0} accessories · {s.mainSets?.filter(x => x.completed).length || 0} main sets
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      );
+    };
+
+    // ============================================================
+    // SETTINGS VIEW
+    // ============================================================
+    const SettingsView = ({ state, onBack, onUpdateState }) => {
+      const [showReset, setShowReset] = useState(false);
+      const updateTM = (lift, v) => {
+        const val = Math.max(45, round5(v));
+        onUpdateState({ ...state, trainingMaxes: { ...state.trainingMaxes, [lift]: val } });
+      };
+      return (
+        <div className="px-5 pb-24 pt-6 max-w-2xl mx-auto">
+          <button onClick={onBack} className="flex items-center gap-1 text-neutral-400 hover:text-neutral-100 text-sm uppercase tracking-wider mb-6">
+            <ChevronLeft size={18} /> Back
+          </button>
+          <div className="font-display text-3xl tracking-wide text-neutral-50 mb-8">SETTINGS</div>
+
+          <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-5 mb-4">
+            <div className="text-xs uppercase tracking-[0.2em] text-neutral-500 font-mono mb-3">TRAINING MAXES</div>
+            <div className="text-sm text-neutral-400 mb-4">Roughly 90% of your true 1-rep max for each lift.</div>
+            {[{ id: 'bench', label: 'Bench Press' }, { id: 'squat', label: 'Back Squat' }, { id: 'deadlift', label: 'Deadlift' }].map(l => (
+              <div key={l.id} className="mb-3 last:mb-0">
+                <div className="text-xs text-neutral-400 mb-2">{l.label}</div>
+                <div className="flex items-center gap-2">
+                  <button onClick={() => updateTM(l.id, state.trainingMaxes[l.id] - 5)} className="w-12 h-12 rounded-lg border border-neutral-800 flex items-center justify-center text-neutral-300 hover:bg-neutral-900">
+                    <Minus size={16} />
+                  </button>
+                  <div className="flex-1 h-12 bg-neutral-900 border border-neutral-800 rounded-lg flex items-center justify-center font-mono text-xl font-bold text-neutral-50">
+                    {state.trainingMaxes[l.id]} <span className="text-neutral-500 text-sm font-normal ml-1">lb</span>
+                  </div>
+                  <button onClick={() => updateTM(l.id, state.trainingMaxes[l.id] + 5)} className="w-12 h-12 rounded-lg border border-neutral-800 flex items-center justify-center text-neutral-300 hover:bg-neutral-900">
+                    <Plus size={16} />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-5 mb-4">
+            <div className="text-xs uppercase tracking-[0.2em] text-neutral-500 font-mono mb-3">CURRENT POSITION</div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <div className="text-xs text-neutral-500 mb-1">Cycle</div>
+                <div className="flex items-center gap-2">
+                  <button onClick={() => onUpdateState({ ...state, cycle: Math.max(1, state.cycle - 1) })} className="w-9 h-9 rounded border border-neutral-800 flex items-center justify-center text-neutral-300 hover:bg-neutral-900"><Minus size={14} /></button>
+                  <div className="flex-1 text-center font-mono text-xl font-bold text-neutral-50">{state.cycle}</div>
+                  <button onClick={() => onUpdateState({ ...state, cycle: state.cycle + 1 })} className="w-9 h-9 rounded border border-neutral-800 flex items-center justify-center text-neutral-300 hover:bg-neutral-900"><Plus size={14} /></button>
+                </div>
+              </div>
+              <div>
+                <div className="text-xs text-neutral-500 mb-1">Week</div>
+                <div className="flex items-center gap-2">
+                  <button onClick={() => onUpdateState({ ...state, week: state.week === 1 ? 4 : state.week - 1 })} className="w-9 h-9 rounded border border-neutral-800 flex items-center justify-center text-neutral-300 hover:bg-neutral-900"><Minus size={14} /></button>
+                  <div className="flex-1 text-center font-mono text-xl font-bold text-neutral-50">{state.week}</div>
+                  <button onClick={() => onUpdateState({ ...state, week: state.week === 4 ? 1 : state.week + 1 })} className="w-9 h-9 rounded border border-neutral-800 flex items-center justify-center text-neutral-300 hover:bg-neutral-900"><Plus size={14} /></button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-5 mb-4">
+            <div className="text-xs uppercase tracking-[0.2em] text-neutral-500 font-mono mb-3">HOW PROGRESSION WORKS</div>
+            <div className="space-y-3 text-sm text-neutral-300">
+              <div>
+                <div className="font-semibold text-neutral-100 mb-1">Main lifts</div>
+                <div className="text-neutral-400 text-xs leading-relaxed">
+                  4-week wave: 5s, 3s, PR week (5/3/1+), deload. After all 4 days × 4 weeks done, TM auto-bumps (+5 bench, +10 squat/DL).
+                </div>
+              </div>
+              <div>
+                <div className="font-semibold text-neutral-100 mb-1">Accessories</div>
+                <div className="text-neutral-400 text-xs leading-relaxed">
+                  Double progression. Hit top of rep range on ALL sets → green "+5 lb" tag appears next session.
+                </div>
+              </div>
+              <div>
+                <div className="font-semibold text-neutral-100 mb-1">Missed reps?</div>
+                <div className="text-neutral-400 text-xs leading-relaxed">
+                  If you fail AMRAP minimum on PR week, drop your TM 10% in settings and rebuild.
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <button onClick={() => setShowReset(true)} className="w-full py-4 rounded-xl border border-red-900/40 text-red-400 uppercase tracking-wider text-sm font-semibold hover:bg-red-950/30 flex items-center justify-center gap-2">
+            <RotateCcw size={16} /> Reset All Progress
+          </button>
+
+          {showReset && (
+            <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-6" onClick={() => setShowReset(false)}>
+              <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-6 w-full max-w-sm" onClick={(e) => e.stopPropagation()}>
+                <div className="text-lg font-bold text-neutral-50 mb-2">Reset everything?</div>
+                <div className="text-sm text-neutral-400 mb-6">Wipes all history. Can't be undone.</div>
+                <div className="flex gap-2">
+                  <button onClick={() => setShowReset(false)} className="flex-1 py-3 rounded-lg border border-neutral-800 text-neutral-300 uppercase tracking-wider text-sm font-semibold hover:bg-neutral-900">Cancel</button>
+                  <button onClick={() => { onUpdateState({ ...defaultState }); setShowReset(false); }} className="flex-1 py-3 rounded-lg bg-red-900/60 text-red-100 uppercase tracking-wider text-sm font-bold hover:bg-red-900">Reset</button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    };
+
+    // ============================================================
+    // ROOT APP
+    // ============================================================
+    const App = () => {
+      const [state, setState] = useState(() => loadState());
+      const [view, setView] = useState('home');
+      const [activeDayId, setActiveDayId] = useState(state.activeSession?.dayId || null);
+
+      useEffect(() => { saveState(state); }, [state]);
+      useEffect(() => {
+        const loader = document.getElementById('loader');
+        if (loader) loader.classList.add('hide');
+      }, []);
+
+      const handleStart = (dayId) => { setActiveDayId(dayId); setView('session'); };
+      const handleComplete = (session) => {
+        setState(finishSession(state, session));
+        setActiveDayId(null);
+        setView('home');
+      };
+      const handleCancel = () => setView('home');
+
+      return (
+        <div className="min-h-screen bg-black text-neutral-100">
+          {view === 'home' && <HomeView state={state} onStart={handleStart} onHistory={() => setView('history')} onSettings={() => setView('settings')} />}
+          {view === 'session' && activeDayId && <SessionView state={state} dayId={activeDayId} onComplete={handleComplete} onCancel={handleCancel} onUpdateState={setState} />}
+          {view === 'history' && <HistoryView state={state} onBack={() => setView('home')} />}
+          {view === 'settings' && <SettingsView state={state} onBack={() => setView('home')} onUpdateState={setState} />}
+        </div>
+      );
+    };
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>

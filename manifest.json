@@ -1,0 +1,18 @@
+{
+  "name": "Iron Log",
+  "short_name": "Iron Log",
+  "description": "4-day strength training tracker with auto-progression",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#000000",
+  "theme_color": "#000000",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "data:image/svg+xml;utf8,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%20512%20512'%3E%3Crect%20width='512'%20height='512'%20rx='110'%20fill='%23000'/%3E%3Crect%20x='96'%20y='96'%20width='320'%20height='320'%20rx='70'%20fill='%23F97316'/%3E%3Cpath%20d='M200%20200l112%20112M340%20340l15%2015M157%20157l15%2015M295%20370l60-60M157%20200l60-60M170%20230l100-100M355%20340l100-100'%20stroke='%23000'%20stroke-width='28'%20stroke-linecap='round'%20fill='none'/%3E%3C/svg%3E",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}
