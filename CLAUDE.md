@@ -8,21 +8,29 @@ Jas — 45, training out of a home gym with a Tonal, barbell, and dumbbells. Cur
 
 ## Working agreement
 
-- **Program changes go in `lib/program.ts` only.** Never edit `app/page.tsx` for routine workout updates (swap exercises, change rep ranges, add a day) — the UI reads from the program module.
+- **The deployed app is `index.html`** (standalone React via CDN + Babel standalone). `vercel.json` skips the build, so Vercel just serves the static files. **Edit `index.html` for routine workout updates.** Mirror the same change to `lib/program.ts` so the (currently unbuilt) Next.js code stays consistent for a future revival.
 - **Commit and push directly to `main` after every change.** No feature branches, no PRs. Single-user app, fast iteration. Vercel auto-deploys `main` on push.
-- **The Claude Code sandbox git proxy returns 403 on pushes to `main`.** Use the GitHub MCP API instead (`mcp__github__create_or_update_file` with `branch: "main"`) to land the commit. After it lands, run `git fetch origin main && git reset --hard origin/main` locally so the working tree stays aligned with `origin/main` (otherwise the stop hook flags an unpushed commit).
+- **The Claude Code sandbox git proxy returns 403 on pushes to `main`.** Use the GitHub MCP API instead (`mcp__github__create_or_update_file` with `branch: "main"`) to land the commit. After it lands, run `git fetch origin main && git reset --hard origin/main` locally so the working tree stays aligned with `origin/main`.
 
 ## Architecture
 
-Next.js 14 App Router. Single-page client app (no API routes, no backend). All workout data persists in `localStorage` on the user's phone.
+Static single-page app. `index.html` boots React 18 via UMD CDN, Tailwind via CDN, and an inline Babel-standalone `<script type="text/babel">` block holds the whole app. Two Vercel serverless functions under `/api/` provide cloud sync and PT sharing. State lives in `localStorage` and mirrors to Vercel KV when a sync secret is configured.
 
 ## Key files
 
-- `lib/program.ts` — **single source of truth for the program**. Exercise library, day templates, 5/3/1 percentages, progression rules, session-building functions. Edit this when modifying workouts.
-- `app/page.tsx` — all UI. Four views: Home, Session, History, Settings. Driven by a single AppState object.
-- `app/layout.tsx` — fonts (Anton display, Outfit body, JetBrains Mono numbers), PWA meta tags for iOS home screen install.
-- `app/globals.css` — Tailwind base + iOS safe-area handling.
-- `public/manifest.json` — PWA manifest, inline SVG icon.
+- `index.html` — **the deployed app**. Program data (ACCESSORIES, DAY_TEMPLATES, WEEK_SCHEMES), all React components, and the cloudSync module are all here.
+- `share.html` — read-only "Coach View" served at `/share/<token>` via a `vercel.json` rewrite. Fetches `/api/share?t=<token>`.
+- `api/state.js` — owner sync endpoint. GET/POST guarded by `x-sync-secret` header against env `SYNC_SECRET`.
+- `api/share.js` — PT read endpoint. Compares `?t=<token>` against `state.shareToken` stored in KV.
+- `vercel.json` — skips build, rewrites `/share/:token` → `/share.html`.
+- `lib/program.ts`, `app/*` — mirror of the program logic, kept in sync but **not built or deployed**.
+- `public/manifest.json` — PWA manifest.
+
+## Required Vercel env vars (for sync + share to work)
+
+- `KV_REST_API_URL`, `KV_REST_API_TOKEN` — auto-provisioned when you attach a Vercel KV (Upstash Redis) store to the project from the Vercel dashboard.
+- `SYNC_SECRET` — random string. Owner pastes this into the app's Settings on each device to enable sync.
+- The PT share token lives **inside the synced state** (`state.shareToken`), generated and rotated from Settings.
 
 ## Design language
 
@@ -39,14 +47,14 @@ Next.js 14 App Router. Single-page client app (no API routes, no backend). All w
 
 ## Days
 
-- **Chest Day** — Bench (main) + Tonal accessories
-- **Full Body Day** — Bench (volume 5×5 at 60%) + supporting lifts
-- **Leg Day** — Squat (main) + accessories
-- **Back Day** — Deadlift (main) + accessories
+- **Chest Day** — Bench (main) + incline DB press, close-grip bench, Tonal tricep extension, Tonal decline fly
+- **Full Body Day** — Bench (volume 5×5 at 60%) + goblet squat, lat pulldown, DB OHP, plank
+- **Leg Day** — Squat (main) + RDL, leg press, leg curls, calf raises, hanging leg raises
+- **Back Day** — Deadlift (main, hex bar) + pull-ups, barbell rows, lat pulldown, face pulls, DB curls
 
 ## Data shape
 
-See `AppState` type in `lib/program.ts`. Workouts in `history`, weekly progress in `completedThisWeek`, accessory weight memory in `accessoryLog`.
+See `AppState` type in `lib/program.ts`. Workouts in `history`, weekly progress in `completedThisWeek`, accessory weight memory in `accessoryLog`, PT share token in `shareToken`.
 
 ## Deployment
 
@@ -58,13 +66,14 @@ iOS PWA caches the bundle aggressively. After a deploy, fully close and reopen t
 
 ## Common tasks
 
-- "Add an exercise" → edit `ACCESSORIES` and `DAY_TEMPLATES` in `lib/program.ts`
+- "Add an exercise" → edit `ACCESSORIES` and `DAY_TEMPLATES` in `index.html`, mirror to `lib/program.ts`
 - "Change rep range for X" → edit `repsLow`/`repsHigh` on that entry in `ACCESSORIES`
 - "Change progression speed" → edit `inc` on accessory entries, or the TM bump amounts in `finishSession`
 - "Add a new day" → add to `DAY_TEMPLATES`, add to `DAY_ORDER` array, update `completedThisWeek` defaults
+- "Recalibrate training maxes" → change them in Settings on the device; the cloud sync will propagate
 
 ## What to avoid
 
-- Don't add a backend without asking — `localStorage` is intentional for simplicity
 - Don't restructure into multiple page routes — single page works well for a fast PWA
-- Don't add authentication — single-user app
+- Don't add a login/auth system — the sync secret + share token model is intentional
+- Don't switch storage backends without asking — Vercel KV is doing the job
