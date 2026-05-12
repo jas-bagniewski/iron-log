@@ -58,7 +58,7 @@ export type AccessoryDef = {
 export const ACCESSORIES: Record<string, AccessoryDef> = {
   // CHEST DAY
   "decline-fly":      { name: "Decline Chest Fly",      sets: 3, repsLow: 8,  repsHigh: 10, inc: 5,  startWeight: 40,  equipment: "tonal" },
-  "tricep-extension": { name: "Tricep Extension",       sets: 3, repsLow: 10, repsHigh: 12, inc: 5,  startWeight: 40,  equipment: "tonal" },
+  "tricep-extension": { name: "Tricep Extension",       sets: 3, repsLow: 10, repsHigh: 12, inc: 5,  startWeight: 50,  equipment: "tonal" },
   "seated-row":       { name: "Seated Row",             sets: 3, repsLow: 8,  repsHigh: 10, inc: 5,  startWeight: 40,  equipment: "tonal" },
   // FULL BODY DAY
   "goblet-squat":     { name: "Goblet Squat",           sets: 3, repsLow: 8,  repsHigh: 10, inc: 5,  startWeight: 50 },
@@ -90,7 +90,7 @@ export type DayTemplate = {
 };
 
 export const DAY_TEMPLATES: Record<string, DayTemplate> = {
-  chest:    { id: "chest",    name: "Chest Day",     mainLift: "bench",    mainName: "Bench Press",          isVolume: false, accessories: ["decline-fly", "tricep-extension", "seated-row"] },
+  chest:    { id: "chest",    name: "Chest Day",     mainLift: "bench",    mainName: "Bench Press",          isVolume: false, accessories: ["decline-fly", "tricep-extension"] },
   fullbody: { id: "fullbody", name: "Full Body Day", mainLift: "bench",    mainName: "Bench Press (Volume)", isVolume: true,  accessories: ["goblet-squat", "lat-pulldown", "db-ohp", "plank"] },
   legs:     { id: "legs",     name: "Leg Day",       mainLift: "squat",    mainName: "Back Squat",           isVolume: false, accessories: ["romanian-dl", "leg-press", "leg-curls", "calf-raises", "leg-raises"] },
   back:     { id: "back",     name: "Back Day",      mainLift: "deadlift", mainName: "Deadlift",             isVolume: false, accessories: ["pull-ups", "barbell-rows", "lat-pulldown-back", "face-pulls", "bicep-curls"] },
