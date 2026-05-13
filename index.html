@@ -289,7 +289,7 @@
     // shifted by ±300/±200 cal based on current vs goal BF.
     // If Oura's 7-day total_burn average is available and recent, it replaces the
     // BMR × activity-multiplier TDEE entirely (more accurate than a hardcoded factor).
-    const computeMacroTargets = (bs, oura = null) => {
+    const computeMacroTargets = (bs, oura = null, pace = null) => {
       const stats = { ...defaultBodyStats, ...bs };
       const weightKg = stats.weight * 0.4536;
       const heightCm = stats.height * 2.54;
@@ -305,16 +305,29 @@
         ? oura.total_burn_7d_avg : null;
       const tdee = ouraTdee != null ? ouraTdee : bmr * (ACTIVITY_MULTIPLIERS[stats.activityLevel] || 1.55);
       const bfDelta = (stats.bodyFatPct || 18) - (stats.goalBodyFatPct || 15);
-      let kcal, proteinPerLb, mode;
-      if (bfDelta > 1) { kcal = tdee - 300; proteinPerLb = 1.15; mode = 'cut'; }
-      else if (bfDelta < -1) { kcal = tdee + 200; proteinPerLb = 1.0; mode = 'bulk'; }
-      else { kcal = tdee; proteinPerLb = 1.05; mode = 'maintain'; }
+      let baseKcal, proteinPerLb, mode;
+      if (bfDelta > 1) { baseKcal = tdee - 300; proteinPerLb = 1.15; mode = 'cut'; }
+      else if (bfDelta < -1) { baseKcal = tdee + 200; proteinPerLb = 1.0; mode = 'bulk'; }
+      else { baseKcal = tdee; proteinPerLb = 1.05; mode = 'maintain'; }
       const protein = Math.round(stats.weight * proteinPerLb);
       const fat = Math.round(stats.weight * 0.4);
+
+      // Pace adjustment: if you've been off your goal cal balance the last few
+      // days, today's target nudges to pull the rolling average back. Spread
+      // the catch-up over 3 days and cap at ±400 cal so things stay sane.
+      let adjustment = 0;
+      if (pace && pace.hasEnoughData) {
+        const targetDailyDelta = baseKcal - tdee; // negative when cutting
+        const excess = pace.actualDailyDelta - targetDailyDelta;
+        adjustment = Math.max(-400, Math.min(400, Math.round(-excess / 3)));
+      }
+
+      const kcal = Math.round(baseKcal + adjustment);
       const carbCal = Math.max(0, kcal - protein * 4 - fat * 9);
       const carbs = Math.round(carbCal / 4);
       return {
-        kcal: Math.round(kcal), protein, fat, carbs,
+        kcal, baseKcal: Math.round(baseKcal), adjustment,
+        protein, fat, carbs,
         maintenance: Math.round(tdee), bmr: Math.round(bmr), mode,
         tdeeSource: ouraTdee != null ? 'oura' : 'estimate',
       };
@@ -323,6 +336,49 @@
     const todayKey = () => {
       const d = new Date();
       return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    };
+
+    const dateKey = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+    // Trailing 7-day calibration: how much we've actually eaten vs burned, vs goal.
+    // Excludes today (data is incomplete). Burn comes from Oura's per-day total_cal
+    // when available, else falls back to BMR x activity multiplier as an estimate.
+    const computeWeeklyPace = (state) => {
+      const today = new Date();
+      const ouraDays = (state.oura && state.oura.days) || [];
+      const burnByDate = new Map();
+      ouraDays.forEach((d) => { if (d && d.total_cal != null) burnByDate.set(d.date, d.total_cal); });
+
+      // Fallback per-day burn if Oura missing: BMR * multiplier (constant).
+      const baseTargets = computeMacroTargets(state.bodyStats);
+      const fallbackBurn = baseTargets.maintenance;
+
+      const perDay = [];
+      let intakeSum = 0, burnSum = 0, days = 0;
+      for (let i = 1; i <= 7; i++) {
+        const d = new Date(today); d.setDate(today.getDate() - i);
+        const k = dateKey(d);
+        const meals = (state.mealsByDate && state.mealsByDate[k]) || [];
+        const intake = meals.reduce((s, m) => s + (m.kcal || 0), 0);
+        if (intake > 0) {
+          const burn = burnByDate.has(k) ? burnByDate.get(k) : fallbackBurn;
+          intakeSum += intake;
+          burnSum += burn;
+          days++;
+        }
+        perDay.push({ date: k, intake, burn: burnByDate.get(k) || null });
+      }
+      if (days < 3) {
+        return { hasEnoughData: false, daysCounted: days };
+      }
+      return {
+        hasEnoughData: true,
+        daysCounted: days,
+        avgIntake: Math.round(intakeSum / days),
+        avgBurn: Math.round(burnSum / days),
+        actualDailyDelta: Math.round((intakeSum - burnSum) / days),
+        perDay,
+      };
     };
 
     const sumMeals = (meals) => {
@@ -843,6 +899,65 @@
     };
 
     // ============================================================
+    // PACE CARD (weekly calibration)
+    // ============================================================
+    const PaceCard = ({ state, onOpenDiet }) => {
+      const pace = computeWeeklyPace(state);
+      const targets = computeMacroTargets(state.bodyStats, state.oura, pace);
+      if (!pace.hasEnoughData) {
+        return (
+          <button onClick={onOpenDiet} className="w-full text-left bg-neutral-950 border border-neutral-800 rounded-xl p-4 mb-3 hover:border-neutral-700 active:scale-[0.99]">
+            <div className="flex items-center justify-between mb-1">
+              <div className="text-[10px] uppercase tracking-[0.2em] text-neutral-500 font-mono">PACE</div>
+              <div className="text-[10px] uppercase tracking-wider text-neutral-600 font-mono">{pace.daysCounted}/3 days</div>
+            </div>
+            <div className="text-sm text-neutral-400">Log meals for at least 3 days to see pace.</div>
+          </button>
+        );
+      }
+      const targetDailyDelta = targets.baseKcal - targets.maintenance;
+      const excess = pace.actualDailyDelta - targetDailyDelta;
+      const onTrack = Math.abs(excess) < 100;
+      const ahead = excess < -100;
+      const adjustment = targets.adjustment;
+
+      const status = onTrack ? 'On pace' : ahead ? `Ahead by ${Math.abs(Math.round(excess))} cal/d` : `Behind by ${Math.round(excess)} cal/d`;
+      const statusColor = onTrack ? 'text-green-400' : ahead ? 'text-blue-300' : 'text-orange-300';
+      const modeLabel = targets.mode.toUpperCase();
+      const goalSign = targetDailyDelta < 0 ? '' : '+';
+
+      return (
+        <button onClick={onOpenDiet} className="w-full text-left bg-neutral-950 border border-neutral-800 rounded-xl p-4 mb-3 hover:border-neutral-700 active:scale-[0.99]">
+          <div className="flex items-center justify-between mb-3">
+            <div className="text-[10px] uppercase tracking-[0.2em] text-neutral-500 font-mono">PACE · 7 DAYS</div>
+            <div className={`text-[10px] uppercase tracking-wider font-mono font-semibold ${statusColor}`}>{status}</div>
+          </div>
+          <div className="grid grid-cols-3 gap-2 mb-3">
+            <div>
+              <div className="text-[10px] uppercase tracking-wider text-neutral-500 font-mono">Intake</div>
+              <div className="font-mono text-xl font-bold text-neutral-50 leading-tight">{pace.avgIntake}<span className="text-[10px] text-neutral-500 ml-0.5">cal/d</span></div>
+            </div>
+            <div>
+              <div className="text-[10px] uppercase tracking-wider text-neutral-500 font-mono">Burn</div>
+              <div className="font-mono text-xl font-bold text-neutral-50 leading-tight">{pace.avgBurn}<span className="text-[10px] text-neutral-500 ml-0.5">cal/d</span></div>
+            </div>
+            <div>
+              <div className="text-[10px] uppercase tracking-wider text-neutral-500 font-mono">Net</div>
+              <div className={`font-mono text-xl font-bold leading-tight ${pace.actualDailyDelta < 0 ? 'text-orange-300' : 'text-neutral-50'}`}>
+                {pace.actualDailyDelta > 0 ? '+' : ''}{pace.actualDailyDelta}<span className="text-[10px] text-neutral-500 ml-0.5">cal/d</span>
+              </div>
+            </div>
+          </div>
+          <div className="text-[11px] text-neutral-500 leading-snug">
+            Goal ({modeLabel.toLowerCase()}): {goalSign}{targetDailyDelta} cal/d.
+            {adjustment === 0 ? ' Today stays at baseline.' :
+              ` Today's target ${adjustment > 0 ? '+' : ''}${adjustment} cal vs baseline ${targets.baseKcal} → ${targets.kcal} cal.`}
+          </div>
+        </button>
+      );
+    };
+
+    // ============================================================
     // STRENGTH EVOLUTION CARD
     // ============================================================
     const StrengthEvolutionCard = ({ state }) => {
@@ -944,6 +1059,7 @@
 
           <BodyCompositionCard state={state} onOpenSettings={onSettings} />
           <RecoveryCard state={state} onOpenSettings={onSettings} />
+          <PaceCard state={state} onOpenDiet={onDiet} />
           <StrengthEvolutionCard state={state} />
 
           <div className="text-xs uppercase tracking-[0.2em] text-neutral-500 font-mono mb-3">THIS WEEK</div>
@@ -997,7 +1113,7 @@
             <div className="flex-1 min-w-0">
               <div className="text-xs uppercase tracking-wider text-neutral-500">Today's Diet</div>
               {(() => {
-                const t = computeMacroTargets(state.bodyStats, state.oura);
+                const t = computeMacroTargets(state.bodyStats, state.oura, computeWeeklyPace(state));
                 const meals = state.mealsByDate?.[todayKey()] || [];
                 const sums = sumMeals(meals);
                 const remaining = Math.max(0, t.kcal - sums.kcal);
@@ -1408,7 +1524,8 @@
 
       const today = todayKey();
       const meals = (state.mealsByDate && state.mealsByDate[today]) || [];
-      const targets = computeMacroTargets(state.bodyStats, state.oura);
+      const pace = computeWeeklyPace(state);
+      const targets = computeMacroTargets(state.bodyStats, state.oura, pace);
       const totals = sumMeals(meals);
       const remaining = Math.max(0, targets.kcal - totals.kcal);
 
@@ -1454,7 +1571,14 @@
           <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-5 mb-4">
             <div className="flex items-baseline justify-between mb-1">
               <div className="text-[10px] uppercase tracking-widest text-neutral-500 font-mono">CALORIES REMAINING</div>
-              <div className="text-[10px] uppercase tracking-wider text-neutral-600 font-mono">target {targets.kcal}</div>
+              <div className="text-[10px] uppercase tracking-wider text-neutral-600 font-mono">
+                target {targets.kcal}
+                {targets.adjustment !== 0 && (
+                  <span className={`ml-1 ${targets.adjustment < 0 ? 'text-orange-300' : 'text-blue-300'}`}>
+                    ({targets.adjustment > 0 ? '+' : ''}{targets.adjustment} pace)
+                  </span>
+                )}
+              </div>
             </div>
             <div className="flex items-baseline gap-2 mb-5">
               <div className="font-mono text-5xl font-bold text-neutral-50 leading-none">
@@ -1468,6 +1592,14 @@
               <MacroBar label="Carbs"   current={totals.carbs}   target={targets.carbs} />
               <MacroBar label="Fat"     current={totals.fat}     target={targets.fat} />
             </div>
+            {targets.adjustment !== 0 && (
+              <div className="text-[11px] text-neutral-500 mt-3 leading-snug">
+                <span className={targets.adjustment < 0 ? 'text-orange-300' : 'text-blue-300'}>
+                  Pace adjustment {targets.adjustment > 0 ? '+' : ''}{targets.adjustment} cal
+                </span>
+                {' '}vs baseline {targets.baseKcal}. {targets.adjustment < 0 ? 'You overshot recently — tighter today.' : 'You undershot recently — extra room today.'}
+              </div>
+            )}
           </div>
 
           <div className="flex items-center justify-between mb-3">
