@@ -231,6 +231,69 @@
     };
 
     const estimate1RM = (w, r) => (!w || !r) ? null : Math.round(w * (1 + r / 30));
+
+    // ============================================================
+    // STRENGTH PERCENTILES (age + bodyweight adjusted)
+    // ============================================================
+    // Reference 1RM at 185 lb body weight, age 25-30, male.
+    // Values picked at 5th / 25th / 50th / 75th / 95th percentile bands
+    // (Beginner / Novice / Intermediate / Advanced / Elite).
+    const STRENGTH_REF = {
+      bench:    [155, 200, 245, 295, 355],
+      squat:    [195, 250, 305, 365, 430],
+      deadlift: [240, 300, 365, 435, 510],
+    };
+    const STRENGTH_PCT = [5, 25, 50, 75, 95];
+    const STRENGTH_BANDS = ['Beginner', 'Novice', 'Intermediate', 'Advanced', 'Elite'];
+
+    // Age-adjustment: 1.0 at 30y, drops ~5.3% per decade. Mirrors common
+    // strength-standard age coefficients.
+    const ageFactor = (age) => Math.max(0.5, 1.0 - Math.max(0, (age || 30) - 30) * 0.0053);
+    // Bodyweight sublinear scaling (heavier = lift more absolute but less per kg).
+    const bwFactor = (bw) => Math.pow((bw || 185) / 185, 0.65);
+
+    const adjustedStandards = (lift, bw, age) => {
+      const ref = STRENGTH_REF[lift];
+      if (!ref) return null;
+      const scale = ageFactor(age) * bwFactor(bw);
+      return ref.map((v) => Math.round(v * scale));
+    };
+
+    const computePercentile = (value, standards) => {
+      if (!value || !standards) return null;
+      if (value <= standards[0]) {
+        return Math.max(1, Math.round((value / standards[0]) * STRENGTH_PCT[0]));
+      }
+      for (let i = 0; i < standards.length - 1; i++) {
+        if (value <= standards[i + 1]) {
+          const frac = (value - standards[i]) / (standards[i + 1] - standards[i]);
+          return Math.round(STRENGTH_PCT[i] + frac * (STRENGTH_PCT[i + 1] - STRENGTH_PCT[i]));
+        }
+      }
+      const last = standards[standards.length - 1];
+      const overshoot = (value - last) / (last * 0.15);
+      return Math.min(99, 95 + Math.round(overshoot * 4));
+    };
+
+    const percentileLabel = (p) => {
+      if (p == null) return null;
+      if (p >= 95) return 'Elite';
+      if (p >= 75) return 'Advanced';
+      if (p >= 50) return 'Intermediate';
+      if (p >= 25) return 'Novice';
+      return 'Beginner';
+    };
+
+    const nextMilestone = (value, standards) => {
+      if (!value || !standards) return null;
+      for (let i = 0; i < standards.length; i++) {
+        if (standards[i] > value) {
+          return { value: standards[i], pct: STRENGTH_PCT[i], label: STRENGTH_BANDS[i] };
+        }
+      }
+      return null;
+    };
+
     const getBestE1RM = (history, lift) => {
       if (!history) return null;
       let best = 0;
@@ -962,26 +1025,44 @@
     // ============================================================
     // STRENGTH EVOLUTION CARD (TMs + e1RM merged)
     // ============================================================
+    const pctColor = (p) => {
+      if (p == null) return 'text-neutral-500';
+      if (p >= 75) return 'text-green-400';
+      if (p >= 50) return 'text-orange-300';
+      if (p >= 25) return 'text-neutral-300';
+      return 'text-red-400';
+    };
+
     const StrengthEvolutionCard = ({ state }) => {
       const history = state.trainingMaxesHistory || [];
       const tm = state.trainingMaxes;
+      const bs = state.bodyStats || {};
       const benchPts = sparkPoints(history, 'bench');
       const squatPts = sparkPoints(history, 'squat');
       const dlPts = sparkPoints(history, 'deadlift');
+      const benchE = getBestE1RM(state.history, 'bench');
+      const squatE = getBestE1RM(state.history, 'squat');
+      const dlE = getBestE1RM(state.history, 'deadlift');
       const lifts = [
-        { id: 'bench',    label: 'Bench',    pts: benchPts, val: tm.bench,    e1RM: getBestE1RM(state.history, 'bench'),    color: '#F97316' },
-        { id: 'squat',    label: 'Squat',    pts: squatPts, val: tm.squat,    e1RM: getBestE1RM(state.history, 'squat'),    color: '#84cc16' },
-        { id: 'deadlift', label: 'Deadlift', pts: dlPts,    val: tm.deadlift, e1RM: getBestE1RM(state.history, 'deadlift'), color: '#a78bfa' },
+        { id: 'bench',    label: 'Bench',    pts: benchPts, val: tm.bench,    e1RM: benchE, standards: adjustedStandards('bench', bs.weight, bs.age),    color: '#F97316' },
+        { id: 'squat',    label: 'Squat',    pts: squatPts, val: tm.squat,    e1RM: squatE, standards: adjustedStandards('squat', bs.weight, bs.age),    color: '#84cc16' },
+        { id: 'deadlift', label: 'Deadlift', pts: dlPts,    val: tm.deadlift, e1RM: dlE,    standards: adjustedStandards('deadlift', bs.weight, bs.age), color: '#a78bfa' },
       ];
       return (
         <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-4 mb-3">
           <div className="flex items-center justify-between mb-3">
             <div className="text-[10px] uppercase tracking-[0.2em] text-neutral-500 font-mono">TRAINING MAXES</div>
-            <div className="text-[10px] uppercase tracking-wider text-neutral-600 font-mono">vs 90 days</div>
+            <div className="text-[10px] uppercase tracking-wider text-neutral-600 font-mono">
+              {bs.weight ? `${bs.weight} lb · ${bs.age}y` : 'vs 90 days'}
+            </div>
           </div>
           <div className="grid grid-cols-3 gap-3">
             {lifts.map(l => {
               const delta = l.pts.length >= 2 ? formatDelta(l.pts[l.pts.length - 1].value, valueDaysAgo(l.pts, 90), '', 0) : '—';
+              // Use e1RM if we have one, otherwise treat TM as an approximation of 1RM.
+              const strengthValue = l.e1RM || l.val;
+              const pct = l.standards ? computePercentile(strengthValue, l.standards) : null;
+              const next = l.standards ? nextMilestone(strengthValue, l.standards) : null;
               return (
                 <div key={l.id}>
                   <div className="text-[10px] uppercase tracking-wider text-neutral-500 font-mono">{l.label}</div>
@@ -989,11 +1070,24 @@
                     <div className="font-mono text-xl font-bold text-neutral-50">{l.val}</div>
                     <div className="text-[10px] text-neutral-500">lb</div>
                   </div>
-                  <div className="text-[9px] uppercase tracking-wider text-neutral-600 font-mono mb-1">
-                    {l.e1RM ? `est 1RM ${l.e1RM}` : 'no AMRAP yet'}
+                  <div className="text-[9px] uppercase tracking-wider text-neutral-600 font-mono mb-0.5">
+                    {l.e1RM ? `1RM ${l.e1RM}` : 'no AMRAP'}
                   </div>
-                  <Sparkline points={l.pts} color={l.color} height={28} />
-                  <div className="text-[10px] text-neutral-500 font-mono mt-1">{delta}</div>
+                  {pct != null && (
+                    <div className="text-[10px] font-mono mb-1">
+                      <span className={`font-bold ${pctColor(pct)}`}>{pct}<span className="text-[8px]">th</span></span>
+                      <span className="text-neutral-600 ml-1 uppercase tracking-wider text-[9px]">{percentileLabel(pct)}</span>
+                    </div>
+                  )}
+                  <Sparkline points={l.pts} color={l.color} height={24} />
+                  <div className="flex items-center justify-between mt-1 gap-1">
+                    <div className="text-[10px] text-neutral-500 font-mono">{delta}</div>
+                    {next && (
+                      <div className="text-[9px] text-neutral-600 font-mono uppercase tracking-wider">
+                        →{next.value} <span className="text-neutral-700">{next.pct}th</span>
+                      </div>
+                    )}
+                  </div>
                 </div>
               );
             })}
