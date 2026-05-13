@@ -224,7 +224,8 @@
         } else week += 1;
       }
       const newHistory = [{ ...completed, completedAt: new Date().toISOString() }, ...(state.history || [])].slice(0, 200);
-      return { ...state, cycle, week, trainingMaxes, accessoryLog: newLog, completedThisWeek: newDone, history: newHistory, activeSession: null };
+      const tmHistory = appendTMHistory(state.trainingMaxesHistory, trainingMaxes, 'auto-bump');
+      return { ...state, cycle, week, trainingMaxes, accessoryLog: newLog, completedThisWeek: newDone, history: newHistory, activeSession: null, trainingMaxesHistory: tmHistory };
     };
 
     const estimate1RM = (w, r) => (!w || !r) ? null : Math.round(w * (1 + r / 30));
@@ -262,7 +263,15 @@
       shareToken: null,
       bodyStats: defaultBodyStats,
       bodyStatsHistory: [], // [{ date, weight, bodyFatPct, source }]
+      trainingMaxesHistory: [], // [{ date, bench, squat, deadlift, source }]
       mealsByDate: {}, // 'YYYY-MM-DD': [{ id, name, items, kcal, protein, carbs, fat, source, loggedAt }]
+    };
+
+    // Append a new TM snapshot only if it differs from the most recent one.
+    const appendTMHistory = (history, tms, source = 'auto') => {
+      const last = (history || [])[0];
+      if (last && last.bench === tms.bench && last.squat === tms.squat && last.deadlift === tms.deadlift) return history || [];
+      return [{ date: new Date().toISOString(), ...tms, source }, ...(history || [])].slice(0, 500);
     };
 
     // ============================================================
@@ -363,12 +372,17 @@
           if (tm && tm.bench === 230 && tm.squat === 250 && tm.deadlift === 295) {
             parsed.trainingMaxes = { bench: 200, squat: 165, deadlift: 200 };
           }
+          const tms = parsed.trainingMaxes || defaultState.trainingMaxes;
+          const tmHistory = (parsed.trainingMaxesHistory && parsed.trainingMaxesHistory.length > 0)
+            ? parsed.trainingMaxesHistory
+            : [{ date: new Date().toISOString(), ...tms, source: 'initial' }];
           return {
             ...defaultState,
             ...parsed,
             bodyStats: { ...defaultBodyStats, ...(parsed.bodyStats || {}) },
             mealsByDate: parsed.mealsByDate || {},
             bodyStatsHistory: parsed.bodyStatsHistory || [],
+            trainingMaxesHistory: tmHistory,
           };
         }
       } catch (e) {}
@@ -631,6 +645,161 @@
     );
 
     // ============================================================
+    // SPARKLINE (mini SVG line chart)
+    // ============================================================
+    const Sparkline = ({ points, color = '#F97316', height = 56, fill = true }) => {
+      if (!points || points.length < 2) {
+        return <div className="text-[10px] text-neutral-600 font-mono italic" style={{ height }}>not enough data yet</div>;
+      }
+      const W = 240;
+      const H = height;
+      const values = points.map(p => p.value);
+      const min = Math.min(...values);
+      const max = Math.max(...values);
+      const range = (max - min) || 1;
+      const padY = 4;
+      const pts = points.map((p, i) => {
+        const x = (i / (points.length - 1)) * W;
+        const y = H - padY - ((p.value - min) / range) * (H - padY * 2);
+        return [x, y];
+      });
+      const polyline = pts.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(' ');
+      const polygon = `0,${H} ${polyline} ${W},${H}`;
+      const gradId = `g-${color.replace('#', '')}-${points.length}`;
+      const last = pts[pts.length - 1];
+      return (
+        <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className="w-full" style={{ height }}>
+          {fill && (
+            <defs>
+              <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor={color} stopOpacity="0.35" />
+                <stop offset="100%" stopColor={color} stopOpacity="0" />
+              </linearGradient>
+            </defs>
+          )}
+          {fill && <polygon fill={`url(#${gradId})`} points={polygon} />}
+          <polyline fill="none" stroke={color} strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round" points={polyline} />
+          <circle cx={last[0]} cy={last[1]} r="3" fill={color} />
+        </svg>
+      );
+    };
+
+    // Reduce raw history (newest first) to ordered points for the chart, filtering nulls.
+    const sparkPoints = (entries, field) => {
+      if (!Array.isArray(entries)) return [];
+      const arr = entries
+        .filter(e => e && e[field] != null && !isNaN(Number(e[field])))
+        .map(e => ({
+          ts: e.date ? new Date(e.date).getTime() : 0,
+          value: Number(e[field]),
+        }))
+        .filter(p => p.ts > 0)
+        .sort((a, b) => a.ts - b.ts);
+      return arr;
+    };
+
+    // Find a value from ~N days ago for delta calc.
+    const valueDaysAgo = (points, days) => {
+      if (!points || points.length === 0) return null;
+      const cutoff = Date.now() - days * 86_400_000;
+      // Find the point closest to cutoff (in time), from before or at cutoff.
+      let best = null;
+      for (const p of points) {
+        if (p.ts <= cutoff) best = p;
+        else break;
+      }
+      return best ? best.value : points[0].value;
+    };
+
+    const formatDelta = (now, then, unit = '', precision = 1) => {
+      if (now == null || then == null) return '—';
+      const d = now - then;
+      const sign = d > 0 ? '+' : '';
+      return `${sign}${d.toFixed(precision)}${unit}`;
+    };
+
+    // ============================================================
+    // BODY COMPOSITION CARD
+    // ============================================================
+    const BodyCompositionCard = ({ state, onOpenSettings }) => {
+      const bs = state.bodyStats || defaultBodyStats;
+      const wPoints = sparkPoints(state.bodyStatsHistory, 'weight');
+      const bfPoints = sparkPoints(state.bodyStatsHistory, 'bodyFatPct');
+      const wDelta = wPoints.length >= 2 ? formatDelta(wPoints[wPoints.length - 1].value, valueDaysAgo(wPoints, 30), ' lb', 1) : '—';
+      const bfDelta = bfPoints.length >= 2 ? formatDelta(bfPoints[bfPoints.length - 1].value, valueDaysAgo(bfPoints, 30), '%', 1) : '—';
+      const lastSync = bs.withingsLastSync ? formatRelative(bs.withingsLastSync) : null;
+      return (
+        <button onClick={onOpenSettings} className="w-full text-left bg-neutral-950 border border-neutral-800 rounded-xl p-4 mb-3 hover:border-neutral-700 active:scale-[0.99]">
+          <div className="flex items-center justify-between mb-3">
+            <div className="text-[10px] uppercase tracking-[0.2em] text-neutral-500 font-mono">BODY COMPOSITION</div>
+            {lastSync && <div className="text-[10px] uppercase tracking-wider text-green-400 font-mono">Withings · {lastSync}</div>}
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <div className="flex items-baseline gap-1.5 mb-1">
+                <div className="font-mono text-2xl font-bold text-neutral-50">{bs.weight}</div>
+                <div className="text-xs text-neutral-500 font-mono">lb</div>
+                <div className={`ml-auto text-[10px] font-mono ${wPoints.length >= 2 && wPoints[wPoints.length - 1].value - valueDaysAgo(wPoints, 30) < 0 ? 'text-orange-300' : 'text-neutral-400'}`}>{wDelta} <span className="text-neutral-600">30d</span></div>
+              </div>
+              <Sparkline points={wPoints} color="#F97316" height={36} />
+            </div>
+            <div>
+              <div className="flex items-baseline gap-1.5 mb-1">
+                <div className="font-mono text-2xl font-bold text-neutral-50">{bs.bodyFatPct ?? '—'}</div>
+                <div className="text-xs text-neutral-500 font-mono">% bf</div>
+                <div className={`ml-auto text-[10px] font-mono ${bfPoints.length >= 2 && bfPoints[bfPoints.length - 1].value - valueDaysAgo(bfPoints, 30) < 0 ? 'text-orange-300' : 'text-neutral-400'}`}>{bfDelta} <span className="text-neutral-600">30d</span></div>
+              </div>
+              <Sparkline points={bfPoints} color="#60a5fa" height={36} />
+            </div>
+          </div>
+          <div className="text-[10px] text-neutral-600 mt-3 font-mono uppercase tracking-wider">
+            Goal {bs.goalBodyFatPct}% · {wPoints.length + bfPoints.length === 0 ? 'tap to log weigh-in' : 'tap to update or connect Withings'}
+          </div>
+        </button>
+      );
+    };
+
+    // ============================================================
+    // STRENGTH EVOLUTION CARD
+    // ============================================================
+    const StrengthEvolutionCard = ({ state }) => {
+      const history = state.trainingMaxesHistory || [];
+      const tm = state.trainingMaxes;
+      const benchPts = sparkPoints(history, 'bench');
+      const squatPts = sparkPoints(history, 'squat');
+      const dlPts = sparkPoints(history, 'deadlift');
+      const lifts = [
+        { id: 'bench',    label: 'Bench',    pts: benchPts, val: tm.bench,    color: '#F97316' },
+        { id: 'squat',    label: 'Squat',    pts: squatPts, val: tm.squat,    color: '#84cc16' },
+        { id: 'deadlift', label: 'Deadlift', pts: dlPts,    val: tm.deadlift, color: '#a78bfa' },
+      ];
+      return (
+        <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-4 mb-3">
+          <div className="flex items-center justify-between mb-3">
+            <div className="text-[10px] uppercase tracking-[0.2em] text-neutral-500 font-mono">TRAINING MAXES</div>
+            <div className="text-[10px] uppercase tracking-wider text-neutral-600 font-mono">vs 90 days</div>
+          </div>
+          <div className="grid grid-cols-3 gap-3">
+            {lifts.map(l => {
+              const delta = l.pts.length >= 2 ? formatDelta(l.pts[l.pts.length - 1].value, valueDaysAgo(l.pts, 90), '', 0) : '—';
+              return (
+                <div key={l.id}>
+                  <div className="text-[10px] uppercase tracking-wider text-neutral-500 font-mono">{l.label}</div>
+                  <div className="flex items-baseline gap-1 mb-1">
+                    <div className="font-mono text-xl font-bold text-neutral-50">{l.val}</div>
+                    <div className="text-[10px] text-neutral-500">lb</div>
+                  </div>
+                  <Sparkline points={l.pts} color={l.color} height={28} />
+                  <div className="text-[10px] text-neutral-500 font-mono mt-1">{delta}</div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      );
+    };
+
+    // ============================================================
     // HOME VIEW
     // ============================================================
     const SyncBadge = ({ status }) => {
@@ -690,6 +859,9 @@
             </div>
           </div>
 
+          <BodyCompositionCard state={state} onOpenSettings={onSettings} />
+          <StrengthEvolutionCard state={state} />
+
           <div className="text-xs uppercase tracking-[0.2em] text-neutral-500 font-mono mb-3">THIS WEEK</div>
           <div className="grid grid-cols-2 gap-3 mb-6">
             {DAY_ORDER.map(dayId => {
@@ -719,24 +891,22 @@
             })}
           </div>
 
-          <div className="text-xs uppercase tracking-[0.2em] text-neutral-500 font-mono mb-3">TRAINING MAXES</div>
-          <div className="grid grid-cols-3 gap-2 mb-4">
-            <StatBox label="Bench" value={state.trainingMaxes.bench} best={benchE} />
-            <StatBox label="Squat" value={state.trainingMaxes.squat} best={squatE} />
-            <StatBox label="Deadlift" value={state.trainingMaxes.deadlift} best={dlE} />
-          </div>
-
-          <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-4 flex items-center gap-3 mb-4">
-            <div className="w-10 h-10 rounded-lg bg-orange-500/10 border border-orange-500/30 flex items-center justify-center">
-              <Award size={18} className="text-orange-400" />
+          {(benchE || squatE || dlE) && (
+            <div className="grid grid-cols-3 gap-2 mb-3">
+              {[
+                { label: 'Bench e1RM', v: benchE },
+                { label: 'Squat e1RM', v: squatE },
+                { label: 'DL e1RM',    v: dlE },
+              ].map((s, i) => (
+                <div key={i} className="bg-neutral-950 border border-neutral-800 rounded-lg p-2.5 text-center">
+                  <div className="text-[9px] uppercase tracking-wider text-neutral-500 font-mono">{s.label}</div>
+                  <div className="font-mono text-lg font-bold text-neutral-50 leading-tight">{s.v || '—'}<span className="text-[10px] text-neutral-500 ml-0.5">lb</span></div>
+                </div>
+              ))}
             </div>
-            <div className="flex-1">
-              <div className="text-xs uppercase tracking-wider text-neutral-500">Sessions Logged</div>
-              <div className="font-mono text-2xl font-bold text-neutral-50">{total}</div>
-            </div>
-          </div>
+          )}
 
-          <button onClick={onDiet} className="w-full bg-neutral-950 border border-neutral-800 rounded-xl p-4 flex items-center gap-3 hover:border-neutral-700 active:scale-[0.99] text-left">
+          <button onClick={onDiet} className="w-full bg-neutral-950 border border-neutral-800 rounded-xl p-4 flex items-center gap-3 hover:border-neutral-700 active:scale-[0.99] text-left mb-3">
             <div className="w-10 h-10 rounded-lg bg-orange-500/10 border border-orange-500/30 flex items-center justify-center shrink-0">
               <Utensils size={18} className="text-orange-400" />
             </div>
@@ -1555,7 +1725,9 @@
 
       const updateTM = (lift, v) => {
         const val = Math.max(45, round5(v));
-        onUpdateState({ ...state, trainingMaxes: { ...state.trainingMaxes, [lift]: val } });
+        const nextTMs = { ...state.trainingMaxes, [lift]: val };
+        const tmHistory = appendTMHistory(state.trainingMaxesHistory, nextTMs, 'manual');
+        onUpdateState({ ...state, trainingMaxes: nextTMs, trainingMaxesHistory: tmHistory });
       };
 
       const saveSecret = () => {
@@ -1770,6 +1942,42 @@
       useEffect(() => {
         saveState(state);
         if (cloudSync.getSecret()) cloudSync.scheduleSave(state);
+      }, [state]);
+
+      // Auto-sync Withings once per session if it's been >6 days since the last sync.
+      const autoSyncedRef = React.useRef(false);
+      useEffect(() => {
+        if (autoSyncedRef.current) return;
+        if (!state || !cloudSync.getSecret()) return;
+        const last = state.bodyStats?.withingsLastSync;
+        if (!last) return; // never connected, skip
+        if (Date.now() - last < 6 * 86_400_000) return;
+        autoSyncedRef.current = true;
+        const secret = cloudSync.getSecret();
+        fetch('/api/withings/sync', { headers: { 'x-sync-secret': secret } })
+          .then(r => r.ok ? r.json() : null)
+          .then(j => {
+            if (!j || j.weight_lb == null) return;
+            setState(prev => {
+              if (!prev) return prev;
+              const nextBs = {
+                ...prev.bodyStats,
+                weight: j.weight_lb,
+                bodyFatPct: j.body_fat_pct != null ? j.body_fat_pct : prev.bodyStats?.bodyFatPct,
+                lastUpdated: new Date().toISOString(),
+                withingsLastSync: j.last_sync_at,
+                withingsLastMeasuredAt: j.measured_at,
+                withingsLeanMassKg: j.lean_mass_kg,
+                withingsFatMassKg: j.fat_mass_kg,
+              };
+              const history = [
+                { date: todayKey(), weight: nextBs.weight, bodyFatPct: nextBs.bodyFatPct, source: 'withings-auto' },
+                ...(prev.bodyStatsHistory || []),
+              ].slice(0, 365);
+              return { ...prev, bodyStats: nextBs, bodyStatsHistory: history };
+            });
+          })
+          .catch(() => {});
       }, [state]);
 
       useEffect(() => {
