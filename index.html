@@ -181,13 +181,15 @@
 
     const buildAccessory = (id, log) => {
       const def = ACCESSORIES[id];
-      const last = log[id] || { weight: def.startWeight, hitTopOnAllSets: false };
-      const suggested = last.hitTopOnAllSets ? last.weight + def.inc : last.weight;
+      const last = log[id] || { weight: def.startWeight, hitTopOnAllSets: false, bumpMult: 1 };
+      const bumpMult = last.bumpMult || 1;
+      const bumpAmount = last.hitTopOnAllSets ? def.inc * bumpMult : 0;
+      const suggested = last.weight + bumpAmount;
       return {
         id, name: def.name, sets: def.sets, repsLow: def.repsLow, repsHigh: def.repsHigh, inc: def.inc,
         isTimed: def.isTimed, isBodyweight: def.isBodyweight,
         weight: suggested, lastWeight: last.weight,
-        progressionHint: last.hitTopOnAllSets ? `+${def.inc} lb from last time` : null,
+        progressionHint: bumpAmount > 0 ? `+${bumpAmount} lb from last time` : null,
         setData: Array.from({ length: def.sets }, (_, i) => ({ id: `${id}-${i}`, reps: null, completed: false })),
       };
     };
@@ -213,7 +215,14 @@
         const def = ACCESSORIES[acc.id];
         const reps = acc.setData.map(s => s.reps).filter(r => r != null);
         const hitTop = reps.length === acc.sets && reps.every(r => r >= def.repsHigh);
-        newLog[acc.id] = { weight: acc.weight, hitTopOnAllSets: hitTop, lastReps: reps };
+        // Smart accessory bump: if MIN reps across all sets blew past the top
+        // of the range, the weight is way too light. Scale next session's bump.
+        const minReps = reps.length ? Math.min(...reps) : 0;
+        const overshoot = hitTop ? minReps - def.repsHigh : 0;
+        let bumpMult = 1;
+        if (overshoot >= 5) bumpMult = 3;        // monster overshoot
+        else if (overshoot >= 3) bumpMult = 2;   // strong overshoot
+        newLog[acc.id] = { weight: acc.weight, hitTopOnAllSets: hitTop, lastReps: reps, bumpMult };
       });
       const done = { ...state.completedThisWeek, [completed.dayId]: true };
       let { cycle, week, trainingMaxes } = state;
@@ -312,13 +321,19 @@
 
       const accessoryNotes = (completed.accessories || []).map((acc) => {
         const log = (nextState.accessoryLog || {})[acc.id];
+        const def = ACCESSORIES[acc.id];
+        const hitTop = !!(log && log.hitTopOnAllSets);
+        const bumpMult = (log && log.bumpMult) || 1;
+        const baseInc = def ? def.inc : 0;
+        const inc = hitTop ? baseInc * bumpMult : 0;
         return {
           id: acc.id, name: acc.name,
           weight: acc.weight,
           isBodyweight: acc.isBodyweight,
           isTimed: acc.isTimed,
-          hitTop: !!(log && log.hitTopOnAllSets),
-          inc: log && log.hitTopOnAllSets ? (ACCESSORIES[acc.id] && ACCESSORIES[acc.id].inc) || 0 : 0,
+          hitTop,
+          inc,
+          bumpMult,
           setsLogged: (acc.setData || []).filter((x) => x.completed).length,
           setsTotal: (acc.setData || []).length,
         };
@@ -1489,7 +1504,12 @@
                     </div>
                     <div className="text-right shrink-0">
                       {acc.hitTop && acc.inc > 0 ? (
-                        <div className="text-xs font-mono text-green-400 font-bold">+{acc.inc} lb next</div>
+                        <>
+                          <div className="text-xs font-mono text-green-400 font-bold">+{acc.inc} lb next{acc.bumpMult > 1 ? ` (${acc.bumpMult}×)` : ''}</div>
+                          {acc.bumpMult > 1 && (
+                            <div className="text-[9px] uppercase tracking-wider text-orange-300 font-mono">crushed range</div>
+                          )}
+                        </>
                       ) : (
                         <div className="text-[10px] uppercase tracking-wider text-neutral-600 font-mono">hold {acc.isBodyweight ? 'bw' : acc.weight + ' lb'}</div>
                       )}
