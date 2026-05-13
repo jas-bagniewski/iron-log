@@ -218,16 +218,33 @@
       const done = { ...state.completedThisWeek, [completed.dayId]: true };
       let { cycle, week, trainingMaxes } = state;
       let newDone = done;
+      let cycleAdvanced = false;
+      let smartBumped = null; // { lift, fromTM, toTM } if a mid-cycle smart bump fired
+
+      // Smart bump: if AMRAP crushed target by +3 reps or more on a non-volume
+      // session, bump that lift's TM mid-cycle instead of waiting for end of
+      // cycle. Catches fast progressors whose TM is too conservative.
+      if (!completed.isVolume) {
+        const amrap = (completed.mainSets || []).find((s) => s.isAmrap && s.actualReps != null);
+        if (amrap && amrap.actualReps >= amrap.targetReps + 3) {
+          const lift = completed.mainLift;
+          const bump = lift === 'bench' ? 5 : 10;
+          const fromTM = trainingMaxes[lift];
+          trainingMaxes = { ...trainingMaxes, [lift]: fromTM + bump };
+          smartBumped = { lift, fromTM, toTM: fromTM + bump, repsOverTarget: amrap.actualReps - amrap.targetReps };
+        }
+      }
+
       if (Object.values(done).every(v => v)) {
         newDone = { chest: false, fullbody: false, legs: false, back: false };
         if (week === 4) {
-          week = 1; cycle += 1;
+          week = 1; cycle += 1; cycleAdvanced = true;
           trainingMaxes = { bench: trainingMaxes.bench + 5, squat: trainingMaxes.squat + 10, deadlift: trainingMaxes.deadlift + 10 };
         } else week += 1;
       }
-      const newHistory = [{ ...completed, completedAt: new Date().toISOString() }, ...(state.history || [])].slice(0, 200);
-      const tmHistory = appendTMHistory(state.trainingMaxesHistory, trainingMaxes, 'auto-bump');
-      return { ...state, cycle, week, trainingMaxes, accessoryLog: newLog, completedThisWeek: newDone, history: newHistory, activeSession: null, trainingMaxesHistory: tmHistory };
+      const newHistory = [{ ...completed, completedAt: new Date().toISOString(), smartBumped }, ...(state.history || [])].slice(0, 200);
+      const tmHistory = appendTMHistory(state.trainingMaxesHistory, trainingMaxes, smartBumped ? 'smart-bump' : (cycleAdvanced ? 'cycle-end' : 'unchanged'));
+      return { ...state, cycle, week, trainingMaxes, accessoryLog: newLog, completedThisWeek: newDone, history: newHistory, activeSession: null, trainingMaxesHistory: tmHistory, _lastSmartBump: smartBumped };
     };
 
     const estimate1RM = (w, r) => (!w || !r) ? null : Math.round(w * (1 + r / 30));
@@ -275,8 +292,11 @@
       let intensityHint = null;
       if (amrap && amrap.targetReps != null) {
         const overshoot = amrap.actualReps - amrap.targetReps;
-        if (overshoot >= 4) intensityHint = `Crushed it — ${overshoot} reps above target. If next ${lift} week feels similar, bump TM by 10 lb.`;
-        else if (overshoot >= 2) intensityHint = `Strong AMRAP — ${overshoot} above target. You're on track to bump TM at end of cycle.`;
+        // Note: when overshoot >= 3, finishSession will smart-bump the TM
+        // immediately. The smart-bump card in the UI tells that story; hint
+        // here just covers the moderate / on-target / under cases.
+        if (overshoot >= 3) intensityHint = null; // covered by SMART-BUMP card
+        else if (overshoot >= 2) intensityHint = `Strong AMRAP — ${overshoot} above target. On track to bump TM at end of cycle.`;
         else if (overshoot < 0) intensityHint = `Below AMRAP target. If this happens twice in a row, drop TM 5-10 lb and rebuild.`;
         else intensityHint = `Right at target. TM is well-calibrated.`;
       }
@@ -350,6 +370,7 @@
         totalVolume, setsCompleted,
         accessoryNotes,
         tmBumped, prevTMs: prevState.trainingMaxes, newTMs: nextState.trainingMaxes,
+        smartBumped: nextState._lastSmartBump || null,
         cycleAdvanced, weekAdvanced,
         newCycle: nextState.cycle, newWeek: nextState.week,
         nextPreview,
@@ -1479,7 +1500,24 @@
             </div>
           )}
 
-          {s.tmBumped && (
+          {s.smartBumped && (
+            <div className="bg-gradient-to-br from-orange-500/15 to-orange-500/5 border border-orange-500/40 rounded-xl p-4 mb-3">
+              <div className="text-[10px] uppercase tracking-[0.2em] text-orange-400 font-bold mb-2">★ TM SMART-BUMP</div>
+              <div className="flex items-baseline gap-3 mb-2">
+                <div className="capitalize font-mono text-lg font-bold text-neutral-50">{s.smartBumped.lift}</div>
+                <div className="font-mono text-lg text-neutral-400">
+                  <span className="text-neutral-500 line-through mr-1">{s.smartBumped.fromTM}</span>
+                  → {s.smartBumped.toTM} <span className="text-[10px] text-neutral-500 font-normal">lb</span>
+                </div>
+                <div className="text-[10px] font-mono text-green-400">+{s.smartBumped.toTM - s.smartBumped.fromTM} lb</div>
+              </div>
+              <div className="text-xs text-neutral-400">
+                You hit the AMRAP +{s.smartBumped.repsOverTarget} reps over target — TM was too conservative. Next cycle's working weights all scale up from {s.smartBumped.toTM} lb.
+              </div>
+            </div>
+          )}
+
+          {s.tmBumped && !s.smartBumped && (
             <div className="bg-gradient-to-br from-orange-500/15 to-orange-500/5 border border-orange-500/40 rounded-xl p-4 mb-3">
               <div className="text-[10px] uppercase tracking-[0.2em] text-orange-400 font-bold mb-2">★ CYCLE COMPLETE · TM AUTO-BUMP</div>
               <div className="grid grid-cols-3 gap-2">
