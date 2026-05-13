@@ -24,7 +24,6 @@
 
   <script>
     const DAY_NAMES = { chest: "Chest", fullbody: "Full Body", legs: "Legs", back: "Back" };
-    const WEEK_LABELS = { 1: "5s WEEK", 2: "3s WEEK", 3: "PR WEEK", 4: "DELOAD" };
 
     const root = document.getElementById("root");
 
@@ -35,12 +34,14 @@
       return q.get("t");
     };
 
+    const escapeHtml = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
     const renderError = (msg) => {
       root.innerHTML = `
         <div class="font-display text-3xl tracking-wide mb-4">IRON LOG</div>
         <div class="bg-neutral-950 border border-red-900/40 rounded-xl p-6 text-center">
           <div class="text-red-400 font-semibold mb-1">Can't load</div>
-          <div class="text-neutral-400 text-sm">${msg}</div>
+          <div class="text-neutral-400 text-sm">${escapeHtml(msg)}</div>
         </div>`;
     };
 
@@ -48,6 +49,17 @@
       if (!iso) return "";
       try { return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric" }); }
       catch { return ""; }
+    };
+    const fmtRel = (ts) => {
+      if (!ts) return null;
+      const diff = Date.now() - ts;
+      const m = Math.floor(diff / 60000);
+      if (m < 1) return 'just now';
+      if (m < 60) return `${m}m ago`;
+      const h = Math.floor(m / 60);
+      if (h < 24) return `${h}h ago`;
+      const d = Math.floor(h / 24);
+      return `${d}d ago`;
     };
 
     const estimate1RM = (w, r) => (!w || !r) ? null : Math.round(w * (1 + r / 30));
@@ -64,6 +76,106 @@
       });
       return best || null;
     };
+    const scoreColor = (n) => {
+      if (n == null) return 'text-neutral-500';
+      if (n >= 85) return 'text-green-400';
+      if (n >= 70) return 'text-orange-300';
+      return 'text-red-400';
+    };
+
+    const sessionPreviewCard = (sess, opts = {}) => {
+      const { done = false } = opts;
+      const mainRows = (sess.mainSets || []).map((set, i) => `
+        <div class="flex items-center justify-between px-3 py-2 rounded ${done ? 'bg-neutral-900/60' : 'bg-neutral-900'} border border-neutral-800">
+          <div class="text-xs uppercase tracking-wider text-neutral-500 font-mono">Set ${i + 1}${set.isAmrap ? ' · AMRAP' : ''}</div>
+          <div class="font-mono text-sm text-neutral-100 font-bold">
+            ${set.weight}<span class="text-[10px] text-neutral-500 font-normal ml-0.5">lb</span>
+            <span class="text-neutral-600 mx-1">·</span>
+            ${set.targetReps}${set.isAmrap ? '+' : ''}<span class="text-[10px] text-neutral-500 font-normal ml-0.5">reps</span>
+          </div>
+        </div>`).join('');
+
+      const accRows = (sess.accessories || []).map((acc) => {
+        const wt = acc.isBodyweight ? 'bodyweight'
+                 : (acc.weight + ' lb' + (acc.progressionHint ? ` <span class="text-green-400 text-[10px] ml-1">${escapeHtml(acc.progressionHint)}</span>` : ''));
+        const repRange = `${acc.repsLow}-${acc.repsHigh} ${acc.isTimed ? 'sec' : 'reps'}`;
+        const lastReps = acc.lastReps && acc.lastReps.length > 0 ? `<div class="text-[10px] text-neutral-600 font-mono mt-0.5">last: ${acc.lastReps.join(' · ')}</div>` : '';
+        return `
+          <div class="flex items-start justify-between py-2 border-b border-neutral-900 last:border-0 gap-3">
+            <div class="min-w-0">
+              <div class="text-sm text-neutral-100 font-semibold truncate">${escapeHtml(acc.name)}</div>
+              <div class="text-[10px] uppercase tracking-wider text-neutral-500 font-mono mt-0.5">${acc.sets} × ${repRange}</div>
+              ${lastReps}
+            </div>
+            <div class="font-mono text-sm text-neutral-200 shrink-0 text-right">${wt}</div>
+          </div>`;
+      }).join('');
+
+      return `
+        <div class="bg-neutral-950 border ${done ? 'border-green-900/40' : 'border-neutral-800'} rounded-xl p-4 mb-3">
+          <div class="flex items-baseline justify-between mb-3">
+            <div>
+              <div class="font-display text-xl tracking-wide text-neutral-50">${escapeHtml((sess.name || '').toUpperCase())}</div>
+              <div class="text-[10px] uppercase tracking-wider text-neutral-500 font-mono mt-1">${escapeHtml(sess.mainName)} · ${escapeHtml(sess.weekLabel)}</div>
+            </div>
+            ${done ? '<div class="text-[10px] uppercase tracking-wider text-green-400 font-mono font-bold">DONE</div>' : '<div class="text-[10px] uppercase tracking-wider text-orange-400 font-mono font-bold">UPCOMING</div>'}
+          </div>
+          <div class="text-[10px] uppercase tracking-widest text-orange-400 font-semibold mb-2">MAIN LIFT</div>
+          <div class="space-y-1.5 mb-3">${mainRows}</div>
+          <div class="text-[10px] uppercase tracking-widest text-neutral-500 font-mono mb-2">ACCESSORIES</div>
+          <div class="bg-neutral-900/50 border border-neutral-800 rounded-lg px-3">${accRows}</div>
+        </div>`;
+    };
+
+    const historyDetail = (h) => {
+      const mainRows = (h.mainSets || []).map((set, i) => {
+        const reps = set.isAmrap ? (set.actualReps != null ? set.actualReps : (set.completed ? set.targetReps : '—')) : (set.completed ? set.targetReps : '—');
+        const e1 = set.isAmrap && set.actualReps ? estimate1RM(set.weight, set.actualReps) : null;
+        return `
+          <div class="flex items-center px-3 py-1.5 rounded ${set.completed ? 'bg-orange-500/5 border border-orange-500/20' : 'bg-neutral-900 border border-neutral-800 opacity-60'}">
+            <div class="text-[10px] uppercase tracking-wider text-neutral-500 font-mono mr-3">S${i+1}</div>
+            <div class="flex-1 font-mono text-sm text-neutral-100">${set.weight}<span class="text-[10px] text-neutral-500 ml-0.5">lb</span> · ${reps}<span class="text-[10px] text-neutral-500 ml-0.5">reps</span>${set.isAmrap ? ' <span class="text-[10px] uppercase tracking-wider text-orange-400 ml-1">AMRAP</span>' : ''}</div>
+            ${e1 ? `<div class="text-[10px] text-orange-400 font-mono font-bold">e1RM ${e1}</div>` : ''}
+          </div>`;
+      }).join('');
+
+      const accRows = (h.accessories || []).map((acc) => {
+        const sets = (acc.setData || []).map((s, i) => s.completed ? `<span class="text-orange-300">${s.reps}</span>` : '<span class="text-neutral-600">—</span>').join(' · ');
+        const wtLine = acc.isBodyweight ? 'bodyweight' : `${acc.weight} lb`;
+        return `
+          <div class="flex items-baseline justify-between py-1 gap-2">
+            <div class="min-w-0 truncate text-sm text-neutral-200">${escapeHtml(acc.name)}</div>
+            <div class="text-right shrink-0">
+              <div class="font-mono text-xs text-neutral-300">${wtLine}</div>
+              <div class="font-mono text-[10px] text-neutral-500">${sets}</div>
+            </div>
+          </div>`;
+      }).join('');
+
+      return `
+        <details class="bg-neutral-950 border border-neutral-800 rounded-lg">
+          <summary class="cursor-pointer list-none px-4 py-3 flex items-start justify-between gap-3">
+            <div class="min-w-0">
+              <div class="font-semibold text-neutral-50">${escapeHtml(h.name || '')}</div>
+              <div class="text-xs text-neutral-500 font-mono">C${h.cycle}·W${h.week} · ${fmtDate(h.completedAt)}</div>
+            </div>
+            <div class="text-right shrink-0">
+              ${(() => {
+                const amrap = (h.mainSets || []).find(s => s.isAmrap && s.actualReps);
+                if (!amrap) return '<div class="text-[10px] uppercase tracking-wider text-neutral-500">tap for details</div>';
+                return `<div class="font-mono text-orange-400 font-bold">${amrap.weight}×${amrap.actualReps}</div><div class="text-[10px] uppercase tracking-wider text-neutral-500">${escapeHtml(h.mainLift || '')}</div>`;
+              })()}
+            </div>
+          </summary>
+          <div class="px-4 pb-4 space-y-3 border-t border-neutral-800/50 pt-3">
+            <div>
+              <div class="text-[10px] uppercase tracking-widest text-orange-400 font-semibold mb-2">MAIN LIFT</div>
+              <div class="space-y-1.5">${mainRows}</div>
+            </div>
+            ${accRows ? `<div><div class="text-[10px] uppercase tracking-widest text-neutral-500 font-mono mb-1">ACCESSORIES</div><div>${accRows}</div></div>` : ''}
+          </div>
+        </details>`;
+    };
 
     const render = (s) => {
       const tm = s.trainingMaxes || { bench: 0, squat: 0, deadlift: 0 };
@@ -75,56 +187,70 @@
         <div class="bg-neutral-950 border border-neutral-800 rounded-xl p-3">
           <div class="text-[10px] uppercase tracking-wider text-neutral-500 mb-1">${label}</div>
           <div class="font-mono text-xl font-bold text-neutral-50 leading-none">${val}<span class="text-neutral-500 text-xs ml-0.5 font-normal">lb</span></div>
-          ${best ? `<div class="text-[10px] text-neutral-500 mt-1 font-mono">est 1RM: ${best}</div>` : ""}
+          ${best ? `<div class="text-[10px] text-neutral-500 mt-1 font-mono">est 1RM: ${best}</div>` : ''}
         </div>`;
-
-      const accRow = (id, log) => {
-        const isBw = log.weight === 0;
-        const reps = (log.lastReps || []).join(" · ");
-        return `
-          <div class="flex items-center justify-between py-2 border-b border-neutral-900 last:border-0">
-            <div class="text-sm text-neutral-200">${id}</div>
-            <div class="text-right">
-              <div class="font-mono text-sm text-neutral-100">${isBw ? "bodyweight" : log.weight + " lb"}</div>
-              ${reps ? `<div class="text-[10px] text-neutral-500 font-mono">${reps}</div>` : ""}
-            </div>
-          </div>`;
-      };
-
-      const accEntries = Object.entries(s.accessoryLog || {});
-      const accBlock = accEntries.length === 0 ? `
-        <div class="text-sm text-neutral-500">No accessory data yet.</div>` :
-        accEntries.map(([id, log]) => accRow(id, log)).join("");
-
-      const histItem = (h) => {
-        const amrap = (h.mainSets || []).find((set) => set.isAmrap && set.actualReps);
-        return `
-          <div class="bg-neutral-950 border border-neutral-800 rounded-lg p-4">
-            <div class="flex items-start justify-between">
-              <div>
-                <div class="font-semibold text-neutral-50">${h.name || ""}</div>
-                <div class="text-xs text-neutral-500 font-mono">C${h.cycle}·W${h.week} · ${fmtDate(h.completedAt)}</div>
-              </div>
-              ${amrap ? `<div class="text-right">
-                <div class="font-mono text-orange-400 font-bold">${amrap.weight}×${amrap.actualReps}</div>
-                <div class="text-[10px] uppercase tracking-wider text-neutral-500">${h.mainLift || ""}</div>
-              </div>` : ""}
-            </div>
-          </div>`;
-      };
-
-      const histBlock = (s.history || []).length === 0 ? `
-        <div class="bg-neutral-950 border border-neutral-800 rounded-xl p-6 text-center text-neutral-500 text-sm">No sessions logged yet.</div>` :
-        `<div class="space-y-2">${(s.history || []).slice(0, 30).map(histItem).join("")}</div>`;
 
       const doneBlock = Object.keys(DAY_NAMES).map((d) => {
         const done = s.completedThisWeek && s.completedThisWeek[d];
         return `
-          <div class="flex-1 text-center py-2 rounded-lg border ${done ? "bg-green-950/30 border-green-900/40 text-green-300" : "bg-neutral-950 border-neutral-800 text-neutral-500"}">
+          <div class="flex-1 text-center py-2 rounded-lg border ${done ? 'bg-green-950/30 border-green-900/40 text-green-300' : 'bg-neutral-950 border-neutral-800 text-neutral-500'}">
             <div class="text-[10px] uppercase tracking-wider">${DAY_NAMES[d]}</div>
-            <div class="text-xs font-bold mt-0.5">${done ? "DONE" : "—"}</div>
+            <div class="text-xs font-bold mt-0.5">${done ? 'DONE' : 'TODO'}</div>
           </div>`;
-      }).join("");
+      }).join('');
+
+      const upcomingBlock = (s.upcoming || []).length === 0
+        ? '<div class="bg-neutral-950 border border-neutral-800 rounded-xl p-6 text-center text-neutral-500 text-sm">All four days done this week. New cycle starts next session.</div>'
+        : (s.upcoming || []).map(sess => sessionPreviewCard(sess, { done: false })).join('');
+
+      const doneBlockDetailed = (s.doneThisWeek || []).map(sess => sessionPreviewCard(sess, { done: true })).join('');
+
+      const bodyBlock = !s.bodyStats ? '' : `
+        <div class="text-xs uppercase tracking-[0.2em] text-neutral-500 font-mono mb-2">BODY COMPOSITION</div>
+        <div class="bg-neutral-950 border border-neutral-800 rounded-xl p-4 mb-6">
+          <div class="grid grid-cols-3 gap-3">
+            <div>
+              <div class="text-[10px] uppercase tracking-wider text-neutral-500 font-mono">Weight</div>
+              <div class="font-mono text-xl font-bold text-neutral-50">${s.bodyStats.weight ?? '—'}<span class="text-[10px] text-neutral-500 ml-0.5 font-normal">lb</span></div>
+            </div>
+            <div>
+              <div class="text-[10px] uppercase tracking-wider text-neutral-500 font-mono">Body Fat</div>
+              <div class="font-mono text-xl font-bold text-neutral-50">${s.bodyStats.bodyFatPct ?? '—'}<span class="text-[10px] text-neutral-500 ml-0.5 font-normal">%</span></div>
+            </div>
+            <div>
+              <div class="text-[10px] uppercase tracking-wider text-neutral-500 font-mono">Goal BF</div>
+              <div class="font-mono text-xl font-bold text-orange-400">${s.bodyStats.goalBodyFatPct ?? '—'}<span class="text-[10px] text-neutral-500 ml-0.5 font-normal">%</span></div>
+            </div>
+          </div>
+          ${s.bodyStats.lastUpdated ? `<div class="text-[10px] text-neutral-600 font-mono mt-2 uppercase tracking-wider">last weigh-in ${fmtDate(s.bodyStats.lastUpdated)}</div>` : ''}
+        </div>`;
+
+      const recoveryBlock = !s.oura || !s.oura.last_sync_at ? '' : `
+        <div class="text-xs uppercase tracking-[0.2em] text-neutral-500 font-mono mb-2">RECOVERY <span class="text-neutral-600">· OURA ${escapeHtml(fmtRel(s.oura.last_sync_at) || '')}</span></div>
+        <div class="bg-neutral-950 border border-neutral-800 rounded-xl p-4 mb-6">
+          <div class="grid grid-cols-3 gap-3">
+            <div>
+              <div class="text-[10px] uppercase tracking-wider text-neutral-500 font-mono">Sleep</div>
+              <div class="font-mono text-xl font-bold ${scoreColor(s.oura.sleep_score_yesterday)}">${s.oura.sleep_score_yesterday ?? '—'}<span class="text-[10px] text-neutral-500 ml-0.5 font-normal">/100</span></div>
+              <div class="text-[9px] uppercase tracking-wider text-neutral-600 font-mono">last night</div>
+            </div>
+            <div>
+              <div class="text-[10px] uppercase tracking-wider text-neutral-500 font-mono">Readiness</div>
+              <div class="font-mono text-xl font-bold ${scoreColor(s.oura.readiness_score_today)}">${s.oura.readiness_score_today ?? '—'}<span class="text-[10px] text-neutral-500 ml-0.5 font-normal">/100</span></div>
+              <div class="text-[9px] uppercase tracking-wider text-neutral-600 font-mono">today</div>
+            </div>
+            <div>
+              <div class="text-[10px] uppercase tracking-wider text-neutral-500 font-mono">Active burn</div>
+              <div class="font-mono text-xl font-bold text-neutral-50">${s.oura.active_burn_yesterday ?? '—'}<span class="text-[10px] text-neutral-500 ml-0.5 font-normal">cal</span></div>
+              <div class="text-[9px] uppercase tracking-wider text-neutral-600 font-mono">yesterday</div>
+            </div>
+          </div>
+          <div class="text-[10px] text-neutral-600 font-mono mt-3 uppercase tracking-wider">7-day avg burn ${s.oura.total_burn_7d_avg ?? '—'} cal/d (TDEE)</div>
+        </div>`;
+
+      const histBlock = (s.history || []).length === 0
+        ? '<div class="bg-neutral-950 border border-neutral-800 rounded-xl p-6 text-center text-neutral-500 text-sm">No sessions logged yet.</div>'
+        : `<div class="space-y-2">${(s.history || []).slice(0, 30).map(historyDetail).join('')}</div>`;
 
       root.innerHTML = `
         <div class="flex items-center gap-2.5 mb-1">
@@ -138,11 +264,14 @@
         <div class="flex items-center gap-3 my-6">
           <div class="text-xs uppercase tracking-[0.2em] text-neutral-500 font-mono">CYCLE ${s.cycle} · WEEK ${s.week} OF 4</div>
           <div class="flex-1 h-px bg-neutral-800"></div>
-          <div class="text-xs uppercase tracking-[0.2em] font-mono text-orange-400">${WEEK_LABELS[s.week] || ""}</div>
+          <div class="text-xs uppercase tracking-[0.2em] font-mono text-orange-400">${escapeHtml(s.weekLabel || '')}</div>
         </div>
 
         <div class="text-xs uppercase tracking-[0.2em] text-neutral-500 font-mono mb-2">THIS WEEK</div>
         <div class="flex gap-2 mb-6">${doneBlock}</div>
+
+        ${recoveryBlock}
+        ${bodyBlock}
 
         <div class="text-xs uppercase tracking-[0.2em] text-neutral-500 font-mono mb-2">TRAINING MAXES</div>
         <div class="grid grid-cols-3 gap-2 mb-6">
@@ -151,10 +280,12 @@
           ${tmBox("Deadlift", tm.deadlift, dlE)}
         </div>
 
-        <div class="text-xs uppercase tracking-[0.2em] text-neutral-500 font-mono mb-2">CURRENT ACCESSORY WEIGHTS</div>
-        <div class="bg-neutral-950 border border-neutral-800 rounded-xl p-4 mb-6">${accBlock}</div>
+        <div class="text-xs uppercase tracking-[0.2em] text-orange-400 font-mono mb-2">UPCOMING SESSIONS <span class="text-neutral-600">· week ${s.week}</span></div>
+        ${upcomingBlock}
 
-        <div class="text-xs uppercase tracking-[0.2em] text-neutral-500 font-mono mb-2">RECENT SESSIONS</div>
+        ${doneBlockDetailed ? `<div class="text-xs uppercase tracking-[0.2em] text-green-400 font-mono mb-2 mt-6">DONE THIS WEEK</div>${doneBlockDetailed}` : ''}
+
+        <div class="text-xs uppercase tracking-[0.2em] text-neutral-500 font-mono mb-2 mt-6">SESSION HISTORY <span class="text-neutral-600">· tap to expand</span></div>
         ${histBlock}`;
     };
 
