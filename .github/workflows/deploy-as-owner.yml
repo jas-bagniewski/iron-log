@@ -1,0 +1,24 @@
+name: Trigger Vercel deploy
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  retrigger:
+    # Only re-trigger when the push was from a non-owner author.
+    # Prevents infinite loops: our own empty-commit is by jas-bagniewski.
+    if: github.event.head_commit.author.email != '153136332+jas-bagniewski@users.noreply.github.com'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Create owner-authored deploy commit
+        run: |
+          git config user.name "jas-bagniewski"
+          git config user.email "153136332+jas-bagniewski@users.noreply.github.com"
+          git commit --allow-empty -m "Trigger Vercel deploy [skip ci]"
+          git push origin main
