@@ -63,7 +63,88 @@ const DAY_TEMPLATES = {
 };
 const DAY_ORDER = ['chest', 'fullbody', 'legs', 'back'];
 
+const ACTIVITY_MULTIPLIERS = { sedentary: 1.2, light: 1.375, moderate: 1.55, active: 1.725, very_active: 1.9 };
+const DEFAULT_BODY_STATS = {
+  weight: 180, bodyFatPct: null, goalBodyFatPct: 15,
+  height: 70, age: 35, sex: 'male', activityLevel: 'active',
+};
+
 const round5 = (n) => Math.round(n / 5) * 5;
+
+const isoDate = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+const sumMeals = (meals) => {
+  const t = { kcal: 0, protein: 0, carbs: 0, fat: 0 };
+  (meals || []).forEach((m) => {
+    t.kcal += m.kcal || 0; t.protein += m.protein || 0;
+    t.carbs += m.carbs || 0; t.fat += m.fat || 0;
+  });
+  return t;
+};
+
+// Mirrored from index.html. Keep in sync if formulas change.
+function computeWeeklyPace(state, fallbackTdee) {
+  const today = new Date();
+  const ouraDays = (state.oura && state.oura.days) || [];
+  const burnByDate = new Map();
+  ouraDays.forEach((d) => { if (d && d.total_cal != null) burnByDate.set(d.date, d.total_cal); });
+  let intakeSum = 0, burnSum = 0, days = 0;
+  for (let i = 1; i <= 7; i++) {
+    const d = new Date(today); d.setDate(today.getDate() - i);
+    const k = isoDate(d);
+    const meals = (state.mealsByDate && state.mealsByDate[k]) || [];
+    const intake = meals.reduce((s, m) => s + (m.kcal || 0), 0);
+    if (intake > 0) {
+      const burn = burnByDate.has(k) ? burnByDate.get(k) : fallbackTdee;
+      intakeSum += intake; burnSum += burn; days++;
+    }
+  }
+  if (days < 3) return { hasEnoughData: false, daysCounted: days };
+  return {
+    hasEnoughData: true, daysCounted: days,
+    avgIntake: Math.round(intakeSum / days),
+    avgBurn: Math.round(burnSum / days),
+    actualDailyDelta: Math.round((intakeSum - burnSum) / days),
+  };
+}
+
+function computeMacroTargets(bs, oura, pace) {
+  const stats = { ...DEFAULT_BODY_STATS, ...bs };
+  const weightKg = stats.weight * 0.4536;
+  const heightCm = stats.height * 2.54;
+  let bmr;
+  if (stats.bodyFatPct && stats.bodyFatPct > 3 && stats.bodyFatPct < 60) {
+    const leanKg = weightKg * (1 - stats.bodyFatPct / 100);
+    bmr = 370 + 21.6 * leanKg;
+  } else {
+    bmr = 10 * weightKg + 6.25 * heightCm - 5 * stats.age + (stats.sex === 'female' ? -161 : 5);
+  }
+  const ouraTdee = oura && oura.total_burn_7d_avg && oura.last_sync_at
+    && (Date.now() - oura.last_sync_at < 8 * 86_400_000)
+    ? oura.total_burn_7d_avg : null;
+  const tdee = ouraTdee != null ? ouraTdee : bmr * (ACTIVITY_MULTIPLIERS[stats.activityLevel] || 1.55);
+  const bfDelta = (stats.bodyFatPct || 18) - (stats.goalBodyFatPct || 15);
+  let baseKcal, proteinPerLb, mode;
+  if (bfDelta > 1) { baseKcal = tdee - 300; proteinPerLb = 1.15; mode = 'cut'; }
+  else if (bfDelta < -1) { baseKcal = tdee + 200; proteinPerLb = 1.0; mode = 'bulk'; }
+  else { baseKcal = tdee; proteinPerLb = 1.05; mode = 'maintain'; }
+  const protein = Math.round(stats.weight * proteinPerLb);
+  const fat = Math.round(stats.weight * 0.4);
+  let adjustment = 0;
+  if (pace && pace.hasEnoughData) {
+    const targetDailyDelta = baseKcal - tdee;
+    const excess = pace.actualDailyDelta - targetDailyDelta;
+    adjustment = Math.max(-400, Math.min(400, Math.round(-excess / 3)));
+  }
+  const kcal = Math.round(baseKcal + adjustment);
+  const carbCal = Math.max(0, kcal - protein * 4 - fat * 9);
+  const carbs = Math.round(carbCal / 4);
+  return {
+    kcal, baseKcal: Math.round(baseKcal), adjustment,
+    protein, fat, carbs,
+    maintenance: Math.round(tdee), bmr: Math.round(bmr), mode,
+  };
+}
 
 function buildMainSets(tm, week, isVolume) {
   if (isVolume) {
@@ -128,6 +209,31 @@ function publicView(s) {
   const completed = s.completedThisWeek || {};
   const upcoming = DAY_ORDER.filter((d) => !completed[d]).map((d) => buildSessionPreview(d, s)).filter(Boolean);
   const doneThisWeek = DAY_ORDER.filter((d) => completed[d]).map((d) => buildSessionPreview(d, s)).filter(Boolean);
+
+  // Diet: today + last 14 days of meals, plus computed targets + pace.
+  const today = new Date();
+  const todayK = isoDate(today);
+  const recentDays = [];
+  for (let i = 0; i < 14; i++) {
+    const d = new Date(today); d.setDate(today.getDate() - i);
+    const k = isoDate(d);
+    const meals = (s.mealsByDate && s.mealsByDate[k]) || [];
+    const totals = sumMeals(meals);
+    recentDays.push({
+      date: k,
+      mealCount: meals.length,
+      totals,
+      meals: meals.map((m) => ({
+        id: m.id, name: m.name, kcal: m.kcal, protein: m.protein, carbs: m.carbs, fat: m.fat,
+        source: m.source, loggedAt: m.loggedAt,
+      })),
+    });
+  }
+  const placeholderTdee = computeMacroTargets(s.bodyStats, s.oura, null).maintenance;
+  const pace = computeWeeklyPace(s, placeholderTdee);
+  const targets = computeMacroTargets(s.bodyStats, s.oura, pace);
+  const todaysMeals = recentDays[0] || { meals: [], totals: { kcal: 0, protein: 0, carbs: 0, fat: 0 }, mealCount: 0 };
+
   return {
     trainingMaxes: s.trainingMaxes,
     cycle: s.cycle,
@@ -153,6 +259,12 @@ function publicView(s) {
       total_burn_7d_avg: s.oura.total_burn_7d_avg,
       last_sync_at: s.oura.last_sync_at,
     } : null,
+    diet: {
+      targets,
+      pace,
+      today: { date: todayK, meals: todaysMeals.meals, totals: todaysMeals.totals },
+      recent: recentDays.slice(1, 8), // last 7 days excluding today
+    },
   };
 }
 

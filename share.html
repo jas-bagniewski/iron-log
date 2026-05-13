@@ -252,6 +252,112 @@
         ? '<div class="bg-neutral-950 border border-neutral-800 rounded-xl p-6 text-center text-neutral-500 text-sm">No sessions logged yet.</div>'
         : `<div class="space-y-2">${(s.history || []).slice(0, 30).map(historyDetail).join('')}</div>`;
 
+      const dietBlock = (() => {
+        if (!s.diet) return '';
+        const t = s.diet.targets;
+        const tot = s.diet.today.totals;
+        const modeColor = t.mode === 'cut' ? 'text-orange-400' : t.mode === 'bulk' ? 'text-green-400' : 'text-neutral-300';
+        const macroBar = (label, cur, target, unit) => {
+          const pct = target > 0 ? Math.min(100, (cur / target) * 100) : 0;
+          const over = cur > target;
+          return `
+            <div>
+              <div class="flex items-baseline justify-between mb-1">
+                <div class="text-[10px] uppercase tracking-widest text-neutral-500 font-mono">${label}</div>
+                <div class="font-mono text-xs"><span class="text-neutral-100 font-bold">${Math.round(cur)}</span><span class="text-neutral-500"> / ${target}${unit}</span></div>
+              </div>
+              <div class="h-1.5 bg-neutral-900 rounded-full overflow-hidden">
+                <div class="h-full ${over ? 'bg-red-500' : 'bg-orange-500'}" style="width: ${pct}%"></div>
+              </div>
+            </div>`;
+        };
+        const mealRows = (s.diet.today.meals || []).length === 0
+          ? '<div class="text-neutral-500 text-sm text-center py-3">No meals logged yet today.</div>'
+          : (s.diet.today.meals || []).map((m) => `
+            <div class="flex items-start justify-between py-2 border-b border-neutral-900 last:border-0 gap-3">
+              <div class="min-w-0">
+                <div class="text-sm text-neutral-100 truncate">${escapeHtml(m.name)}</div>
+                <div class="text-[10px] text-neutral-500 font-mono mt-0.5">${escapeHtml(m.source || 'manual')} · P ${m.protein}g · C ${m.carbs}g · F ${m.fat}g</div>
+              </div>
+              <div class="font-mono text-sm text-orange-400 font-bold shrink-0">${m.kcal}<span class="text-[10px] text-neutral-500 ml-0.5 font-normal">cal</span></div>
+            </div>`).join('');
+
+        const recentRows = (s.diet.recent || []).map((d) => {
+          const date = new Date(d.date);
+          const dayLabel = date.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+          return `
+            <div class="flex items-center justify-between py-2 border-b border-neutral-900 last:border-0 gap-3">
+              <div class="text-xs text-neutral-300 font-mono">${escapeHtml(dayLabel)}</div>
+              <div class="text-right">
+                <div class="font-mono text-sm text-neutral-100">${d.totals.kcal}<span class="text-[10px] text-neutral-500 ml-0.5">cal</span></div>
+                <div class="text-[10px] text-neutral-500 font-mono">P ${d.totals.protein} · C ${d.totals.carbs} · F ${d.totals.fat} · ${d.mealCount} meal${d.mealCount === 1 ? '' : 's'}</div>
+              </div>
+            </div>`;
+        }).join('');
+
+        const pace = s.diet.pace;
+        const paceBlock = !pace || !pace.hasEnoughData ? '' : (() => {
+          const targetDelta = t.baseKcal - t.maintenance;
+          const excess = pace.actualDailyDelta - targetDelta;
+          const onTrack = Math.abs(excess) < 100;
+          const ahead = excess < -100;
+          const statusColor = onTrack ? 'text-green-400' : ahead ? 'text-blue-300' : 'text-orange-300';
+          const status = onTrack ? 'On pace' : ahead ? `Ahead by ${Math.abs(Math.round(excess))} cal/d` : `Behind by ${Math.round(excess)} cal/d`;
+          return `
+            <div class="bg-neutral-950 border border-neutral-800 rounded-xl p-4 mb-4">
+              <div class="flex items-center justify-between mb-3">
+                <div class="text-[10px] uppercase tracking-[0.2em] text-neutral-500 font-mono">7-DAY PACE</div>
+                <div class="text-[10px] uppercase tracking-wider font-mono font-semibold ${statusColor}">${escapeHtml(status)}</div>
+              </div>
+              <div class="grid grid-cols-3 gap-2">
+                <div>
+                  <div class="text-[10px] uppercase tracking-wider text-neutral-500 font-mono">Intake</div>
+                  <div class="font-mono text-lg font-bold text-neutral-50">${pace.avgIntake}<span class="text-[10px] text-neutral-500 ml-0.5 font-normal">cal/d</span></div>
+                </div>
+                <div>
+                  <div class="text-[10px] uppercase tracking-wider text-neutral-500 font-mono">Burn</div>
+                  <div class="font-mono text-lg font-bold text-neutral-50">${pace.avgBurn}<span class="text-[10px] text-neutral-500 ml-0.5 font-normal">cal/d</span></div>
+                </div>
+                <div>
+                  <div class="text-[10px] uppercase tracking-wider text-neutral-500 font-mono">Net</div>
+                  <div class="font-mono text-lg font-bold ${pace.actualDailyDelta < 0 ? 'text-orange-300' : 'text-neutral-50'}">${pace.actualDailyDelta > 0 ? '+' : ''}${pace.actualDailyDelta}<span class="text-[10px] text-neutral-500 ml-0.5 font-normal">cal/d</span></div>
+                </div>
+              </div>
+              <div class="text-[10px] text-neutral-500 mt-2 font-mono">
+                Goal: ${targetDelta > 0 ? '+' : ''}${targetDelta} cal/d (${escapeHtml(t.mode)})
+              </div>
+            </div>`;
+        })();
+
+        return `
+          <div class="text-xs uppercase tracking-[0.2em] text-neutral-500 font-mono mb-2 mt-6">DIET · TODAY</div>
+          <div class="bg-neutral-950 border border-neutral-800 rounded-xl p-4 mb-4">
+            <div class="flex items-baseline justify-between mb-3">
+              <div>
+                <div class="font-mono text-3xl font-bold text-neutral-50 leading-none">${Math.max(0, t.kcal - tot.kcal)}</div>
+                <div class="text-[10px] uppercase tracking-wider text-neutral-500 font-mono mt-1">cal remaining · target ${t.kcal}${t.adjustment !== 0 ? ` (${t.adjustment > 0 ? '+' : ''}${t.adjustment} pace)` : ''}</div>
+              </div>
+              <div class="text-[10px] uppercase tracking-wider ${modeColor} font-mono font-bold">${escapeHtml((t.mode || '').toUpperCase())}</div>
+            </div>
+            <div class="space-y-2 mb-4">
+              ${macroBar('Calories', tot.kcal, t.kcal, '')}
+              ${macroBar('Protein',  tot.protein, t.protein, 'g')}
+              ${macroBar('Carbs',    tot.carbs,   t.carbs,   'g')}
+              ${macroBar('Fat',      tot.fat,     t.fat,     'g')}
+            </div>
+            <div class="text-[10px] uppercase tracking-wider text-neutral-500 font-mono mb-2">TODAY'S MEALS</div>
+            ${mealRows}
+          </div>
+
+          ${paceBlock}
+
+          ${recentRows ? `
+            <div class="text-[10px] uppercase tracking-wider text-neutral-500 font-mono mb-2">LAST 7 DAYS</div>
+            <div class="bg-neutral-950 border border-neutral-800 rounded-xl p-4 mb-6">${recentRows}</div>
+          ` : ''}
+        `;
+      })();
+
       root.innerHTML = `
         <div class="flex items-center gap-2.5 mb-1">
           <div class="w-9 h-9 bg-orange-500 rounded-lg flex items-center justify-center text-black font-bold">IL</div>
@@ -280,7 +386,9 @@
           ${tmBox("Deadlift", tm.deadlift, dlE)}
         </div>
 
-        <div class="text-xs uppercase tracking-[0.2em] text-orange-400 font-mono mb-2">UPCOMING SESSIONS <span class="text-neutral-600">· week ${s.week}</span></div>
+        ${dietBlock}
+
+        <div class="text-xs uppercase tracking-[0.2em] text-orange-400 font-mono mb-2 mt-6">UPCOMING SESSIONS <span class="text-neutral-600">· week ${s.week}</span></div>
         ${upcomingBlock}
 
         ${doneBlockDetailed ? `<div class="text-xs uppercase tracking-[0.2em] text-green-400 font-mono mb-2 mt-6">DONE THIS WEEK</div>${doneBlockDetailed}` : ''}
