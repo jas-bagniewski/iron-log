@@ -1362,6 +1362,9 @@
     // ============================================================
     const CalorieBalanceCard = ({ state, onOpenDiet }) => {
       const bal = computeCalorieBalance(state);
+      const targets = computeMacroTargets(state.bodyStats, state.oura, null);
+      const dailyGoal = targets.baseKcal - targets.maintenance; // negative cutting, 0 maintain, positive bulk
+      const weeklyGoal = dailyGoal * 7;
       const fmt = (n) => n == null ? '—' : `${n > 0 ? '+' : ''}${Math.round(n)}`;
       const netColor = (n) => {
         if (n == null) return 'text-neutral-500';
@@ -1369,6 +1372,15 @@
         if (n > 100)  return 'text-blue-300';     // surplus
         return 'text-green-400';                  // maintenance window
       };
+      // Goal-aware coloring for the 7-day cumulative number.
+      // "Goal" = weeklyGoal cal. ±700 cal/week (~100/d) = green, ±2100 = orange, beyond = red.
+      const goalZone = (() => {
+        const distance = bal.cumulative.net - weeklyGoal;
+        const abs = Math.abs(distance);
+        if (abs <= 700) return { color: 'text-green-400', label: 'On target', dot: 'bg-green-400' };
+        if (abs <= 2100) return { color: 'text-orange-300', label: distance < 0 ? 'Too aggressive' : (dailyGoal < 0 ? 'Not enough deficit' : (dailyGoal > 0 ? 'Not enough surplus' : 'Off maintenance')), dot: 'bg-orange-300' };
+        return { color: 'text-red-400', label: distance < 0 ? 'Way too aggressive' : (dailyGoal < 0 ? 'Way over goal' : (dailyGoal > 0 ? 'Way under goal' : 'Off maintenance')), dot: 'bg-red-400' };
+      })();
       const ouraConnected = !!(state.oura && state.oura.last_sync_at);
       const haveAnyMeals = bal.cumulative.days > 0 || bal.today.intake > 0;
       if (!haveAnyMeals && !ouraConnected) {
@@ -1379,13 +1391,14 @@
           </button>
         );
       }
+      const goalText = dailyGoal < 0 ? `${dailyGoal} cal/d (cut)` : dailyGoal > 0 ? `+${dailyGoal} cal/d (bulk)` : 'maintenance';
       return (
         <button onClick={onOpenDiet} className="w-full text-left bg-neutral-950 border border-neutral-800 rounded-xl p-4 mb-3 hover:border-neutral-700 active:scale-[0.99]">
           <div className="flex items-center justify-between mb-3">
             <div className="text-[10px] uppercase tracking-[0.2em] text-neutral-500 font-mono">CALORIE BALANCE</div>
-            <div className="text-[10px] uppercase tracking-wider text-neutral-600 font-mono">in − out</div>
+            <div className="text-[10px] uppercase tracking-wider text-neutral-600 font-mono">goal {goalText}</div>
           </div>
-          <div className="grid grid-cols-3 gap-2">
+          <div className="grid grid-cols-3 gap-2 mb-3">
             <div>
               <div className="text-[10px] uppercase tracking-wider text-neutral-500 font-mono">Today</div>
               <div className={`font-mono text-xl font-bold leading-tight ${netColor(bal.today.net)}`}>{fmt(bal.today.net)}</div>
@@ -1404,12 +1417,19 @@
             </div>
             <div>
               <div className="text-[10px] uppercase tracking-wider text-neutral-500 font-mono">7-day</div>
-              <div className={`font-mono text-xl font-bold leading-tight ${netColor(bal.cumulative.net)}`}>{fmt(bal.cumulative.net)}</div>
+              <div className={`font-mono text-xl font-bold leading-tight ${goalZone.color}`}>{fmt(bal.cumulative.net)}</div>
               <div className="text-[9px] uppercase tracking-wider text-neutral-600 font-mono mt-0.5">
                 {bal.cumulative.days}/7 days · ≈{(Math.abs(bal.cumulative.net) / 3500).toFixed(1)} lb {bal.cumulative.net < 0 ? 'loss' : 'gain'}
               </div>
             </div>
           </div>
+          {bal.cumulative.days >= 3 && (
+            <div className="flex items-center gap-2">
+              <div className={`w-1.5 h-1.5 rounded-full ${goalZone.dot}`} />
+              <div className={`text-[10px] uppercase tracking-widest font-mono font-semibold ${goalZone.color}`}>{goalZone.label}</div>
+              <div className="text-[10px] text-neutral-600 font-mono">· vs goal {fmt(weeklyGoal)} cal/wk</div>
+            </div>
+          )}
         </button>
       );
     };
