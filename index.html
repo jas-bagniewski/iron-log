@@ -1335,18 +1335,42 @@
     // ============================================================
     // BODY STATS CARD (in Settings)
     // ============================================================
+    const formatRelative = (ts) => {
+      if (!ts) return null;
+      const diff = Date.now() - ts;
+      const m = Math.floor(diff / 60000);
+      if (m < 1) return 'just now';
+      if (m < 60) return `${m}m ago`;
+      const h = Math.floor(m / 60);
+      if (h < 24) return `${h}h ago`;
+      const d = Math.floor(h / 24);
+      if (d < 30) return `${d}d ago`;
+      return new Date(ts).toLocaleDateString();
+    };
+
     const BodyStatsCard = ({ state, onUpdateState }) => {
       const bs = state.bodyStats || defaultBodyStats;
       const [weightStr, setWeightStr] = useState(String(bs.weight));
       const [bfStr, setBfStr] = useState(String(bs.bodyFatPct ?? ''));
       const [saved, setSaved] = useState(false);
+      const [syncing, setSyncing] = useState(false);
+      const [syncMsg, setSyncMsg] = useState(null);
 
       useEffect(() => {
         setWeightStr(String(bs.weight));
         setBfStr(String(bs.bodyFatPct ?? ''));
       }, [bs.weight, bs.bodyFatPct]);
 
-      const save = () => {
+      // Detect ?withings=connected query param (set by callback redirect) and auto-trigger sync.
+      useEffect(() => {
+        const params = new URLSearchParams(window.location.search);
+        if (params.get('withings') === 'connected') {
+          window.history.replaceState({}, '', window.location.pathname);
+          triggerWithingsSync();
+        }
+      }, []);
+
+      const save = (extra = {}) => {
         const w = parseFloat(weightStr);
         const bf = parseFloat(bfStr);
         if (isNaN(w) || w < 50 || w > 600) return;
@@ -1355,9 +1379,10 @@
           weight: Math.round(w * 10) / 10,
           bodyFatPct: !isNaN(bf) && bf > 3 && bf < 60 ? Math.round(bf * 10) / 10 : null,
           lastUpdated: new Date().toISOString(),
+          ...extra,
         };
         const history = [
-          { date: todayKey(), weight: nextBs.weight, bodyFatPct: nextBs.bodyFatPct, source: 'manual' },
+          { date: todayKey(), weight: nextBs.weight, bodyFatPct: nextBs.bodyFatPct, source: extra.lastSource || 'manual' },
           ...(state.bodyStatsHistory || []),
         ].slice(0, 365);
         onUpdateState({ ...state, bodyStats: nextBs, bodyStatsHistory: history });
@@ -1367,6 +1392,52 @@
 
       const updateField = (key, val) => {
         onUpdateState({ ...state, bodyStats: { ...bs, [key]: val } });
+      };
+
+      const connectWithings = () => {
+        const secret = cloudSync.getSecret();
+        if (!secret) { setSyncMsg('Set your sync secret first.'); return; }
+        window.location.href = `/api/withings/auth?secret=${encodeURIComponent(secret)}`;
+      };
+
+      const triggerWithingsSync = async () => {
+        const secret = cloudSync.getSecret();
+        if (!secret) { setSyncMsg('Set your sync secret first.'); return; }
+        setSyncing(true);
+        setSyncMsg(null);
+        try {
+          const r = await fetch('/api/withings/sync', { headers: { 'x-sync-secret': secret } });
+          const j = await r.json();
+          if (r.status === 409 || j.error === 'not_connected') {
+            setSyncMsg('Not connected yet. Tap Connect Withings.');
+            return;
+          }
+          if (!r.ok) { setSyncMsg(j.error || `HTTP ${r.status}`); return; }
+          if (j.weight_lb == null) { setSyncMsg('No measurements in Withings yet.'); return; }
+          setWeightStr(String(j.weight_lb));
+          if (j.body_fat_pct != null) setBfStr(String(j.body_fat_pct));
+          // Persist the synced values + meta directly to state.
+          const nextBs = {
+            ...bs,
+            weight: j.weight_lb,
+            bodyFatPct: j.body_fat_pct != null ? j.body_fat_pct : bs.bodyFatPct,
+            lastUpdated: new Date().toISOString(),
+            withingsLastSync: j.last_sync_at,
+            withingsLastMeasuredAt: j.measured_at,
+            withingsLeanMassKg: j.lean_mass_kg,
+            withingsFatMassKg: j.fat_mass_kg,
+          };
+          const history = [
+            { date: todayKey(), weight: nextBs.weight, bodyFatPct: nextBs.bodyFatPct, source: 'withings' },
+            ...(state.bodyStatsHistory || []),
+          ].slice(0, 365);
+          onUpdateState({ ...state, bodyStats: nextBs, bodyStatsHistory: history });
+          setSyncMsg(`Synced · measured ${formatRelative(j.measured_at) || 'recently'}`);
+        } catch (e) {
+          setSyncMsg(String(e.message || e));
+        } finally {
+          setSyncing(false);
+        }
       };
 
       const targets = computeMacroTargets(bs);
@@ -1390,10 +1461,38 @@
                 className="w-full bg-neutral-900 border border-neutral-800 focus:border-orange-500 rounded-lg px-3 py-3 text-neutral-50 font-mono text-xl font-bold text-center outline-none" />
             </div>
           </div>
-          <button onClick={save}
+          <button onClick={() => save()}
             className="w-full py-3 rounded-lg bg-orange-500 text-black uppercase tracking-wider text-xs font-bold hover:bg-orange-400 mb-4">
             {saved ? 'Saved' : 'Save weigh-in'}
           </button>
+
+          <div className="bg-neutral-900 border border-neutral-800 rounded-lg p-3 mb-4">
+            <div className="flex items-center justify-between mb-2">
+              <div className="text-[10px] uppercase tracking-widest text-neutral-500 font-mono">Withings</div>
+              {bs.withingsLastSync && (
+                <div className="text-[10px] uppercase tracking-wider text-green-400 font-mono">
+                  · Last sync {formatRelative(bs.withingsLastSync)}
+                </div>
+              )}
+            </div>
+            <div className="flex gap-2">
+              <button onClick={connectWithings} disabled={syncing}
+                className="flex-1 py-2.5 rounded-lg border border-neutral-800 text-neutral-200 uppercase tracking-wider text-[11px] font-semibold hover:bg-neutral-800 disabled:opacity-40">
+                Connect
+              </button>
+              <button onClick={triggerWithingsSync} disabled={syncing}
+                className="flex-1 py-2.5 rounded-lg bg-orange-500 text-black uppercase tracking-wider text-[11px] font-bold hover:bg-orange-400 disabled:opacity-40 flex items-center justify-center gap-2">
+                {syncing ? (
+                  <><div className="w-3 h-3 rounded-full border-2 border-black/30 border-t-black animate-spin" />Syncing</>
+                ) : (
+                  <>Sync now</>
+                )}
+              </button>
+            </div>
+            {syncMsg && (
+              <div className="text-[11px] text-neutral-400 mt-2 leading-snug">{syncMsg}</div>
+            )}
+          </div>
 
           <div className="grid grid-cols-2 gap-3 mb-4">
             <div>
