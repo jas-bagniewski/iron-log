@@ -398,10 +398,13 @@
     };
 
     // Map main lift to the muscle-group label users feel naturally.
+    // The percentile shown is from the main lift (the universally accepted
+    // strength indicator for that group); no peer-group data exists for
+    // most accessories so we don't attempt a composite.
     const MUSCLE_GROUP_LABEL = {
-      bench:    'Upper body pressing',
-      squat:    'Squat / legs',
-      deadlift: 'Posterior chain / pull',
+      bench:    'Upper body strength',
+      squat:    'Leg strength',
+      deadlift: 'Back & posterior strength',
     };
 
     // Overall strength percentile = simple mean of the three main-lift percentiles.
