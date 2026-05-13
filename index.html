@@ -265,6 +265,7 @@
       bodyStatsHistory: [], // [{ date, weight, bodyFatPct, source }]
       trainingMaxesHistory: [], // [{ date, bench, squat, deadlift, source }]
       mealsByDate: {}, // 'YYYY-MM-DD': [{ id, name, items, kcal, protein, carbs, fat, source, loggedAt }]
+      oura: null, // see oura/sync.js response shape
     };
 
     // Append a new TM snapshot only if it differs from the most recent one.
@@ -286,7 +287,9 @@
 
     // Katch-McArdle if BF% known, else Mifflin-St Jeor. Then activity-adjusted, then
     // shifted by ±300/±200 cal based on current vs goal BF.
-    const computeMacroTargets = (bs) => {
+    // If Oura's 7-day total_burn average is available and recent, it replaces the
+    // BMR × activity-multiplier TDEE entirely (more accurate than a hardcoded factor).
+    const computeMacroTargets = (bs, oura = null) => {
       const stats = { ...defaultBodyStats, ...bs };
       const weightKg = stats.weight * 0.4536;
       const heightCm = stats.height * 2.54;
@@ -297,7 +300,10 @@
       } else {
         bmr = 10 * weightKg + 6.25 * heightCm - 5 * stats.age + (stats.sex === 'female' ? -161 : 5);
       }
-      const tdee = bmr * (ACTIVITY_MULTIPLIERS[stats.activityLevel] || 1.55);
+      const ouraTdee = oura && oura.total_burn_7d_avg && oura.last_sync_at
+        && (Date.now() - oura.last_sync_at < 8 * 86_400_000)
+        ? oura.total_burn_7d_avg : null;
+      const tdee = ouraTdee != null ? ouraTdee : bmr * (ACTIVITY_MULTIPLIERS[stats.activityLevel] || 1.55);
       const bfDelta = (stats.bodyFatPct || 18) - (stats.goalBodyFatPct || 15);
       let kcal, proteinPerLb, mode;
       if (bfDelta > 1) { kcal = tdee - 300; proteinPerLb = 1.15; mode = 'cut'; }
@@ -310,6 +316,7 @@
       return {
         kcal: Math.round(kcal), protein, fat, carbs,
         maintenance: Math.round(tdee), bmr: Math.round(bmr), mode,
+        tdeeSource: ouraTdee != null ? 'oura' : 'estimate',
       };
     };
 
@@ -383,6 +390,7 @@
             mealsByDate: parsed.mealsByDate || {},
             bodyStatsHistory: parsed.bodyStatsHistory || [],
             trainingMaxesHistory: tmHistory,
+            oura: parsed.oura || null,
           };
         }
       } catch (e) {}
@@ -760,6 +768,81 @@
     };
 
     // ============================================================
+    // RECOVERY CARD (Oura)
+    // ============================================================
+    const scoreColor = (n) => {
+      if (n == null) return 'text-neutral-500';
+      if (n >= 85) return 'text-green-400';
+      if (n >= 70) return 'text-orange-300';
+      return 'text-red-400';
+    };
+
+    const RecoveryCard = ({ state, onOpenSettings }) => {
+      const o = state.oura;
+      if (!o || !o.last_sync_at) {
+        return (
+          <button onClick={onOpenSettings} className="w-full text-left bg-neutral-950 border border-neutral-800 rounded-xl p-4 mb-3 hover:border-neutral-700 active:scale-[0.99]">
+            <div className="flex items-center justify-between mb-1">
+              <div className="text-[10px] uppercase tracking-[0.2em] text-neutral-500 font-mono">RECOVERY</div>
+              <div className="text-[10px] uppercase tracking-wider text-neutral-600 font-mono">tap to connect</div>
+            </div>
+            <div className="text-sm text-neutral-400">Sync Oura to see sleep, readiness, and live macro targets driven by actual calorie burn.</div>
+          </button>
+        );
+      }
+
+      const last = formatRelative(o.last_sync_at);
+      const sleepHrs = o.sleep_hours_yesterday ? Math.round(o.sleep_hours_yesterday * 10) / 10 : null;
+      const burnDaysPts = (o.days || [])
+        .map((d) => ({ ts: new Date(d.date).getTime(), value: d.active_cal }))
+        .filter((p) => p.ts && p.value != null);
+
+      return (
+        <button onClick={onOpenSettings} className="w-full text-left bg-neutral-950 border border-neutral-800 rounded-xl p-4 mb-3 hover:border-neutral-700 active:scale-[0.99]">
+          <div className="flex items-center justify-between mb-3">
+            <div className="text-[10px] uppercase tracking-[0.2em] text-neutral-500 font-mono">RECOVERY</div>
+            <div className="text-[10px] uppercase tracking-wider text-green-400 font-mono">Oura · {last}</div>
+          </div>
+          <div className="grid grid-cols-3 gap-2 mb-3">
+            <div>
+              <div className="text-[10px] uppercase tracking-wider text-neutral-500 font-mono">Sleep</div>
+              <div className={`font-mono text-2xl font-bold leading-tight ${scoreColor(o.sleep_score_yesterday)}`}>
+                {o.sleep_score_yesterday ?? '—'}<span className="text-[10px] text-neutral-500 ml-0.5 font-normal">/100</span>
+              </div>
+              <div className="text-[9px] uppercase tracking-wider text-neutral-600 mt-0.5 font-mono">last night</div>
+            </div>
+            <div>
+              <div className="text-[10px] uppercase tracking-wider text-neutral-500 font-mono">Readiness</div>
+              <div className={`font-mono text-2xl font-bold leading-tight ${scoreColor(o.readiness_score_today)}`}>
+                {o.readiness_score_today ?? '—'}<span className="text-[10px] text-neutral-500 ml-0.5 font-normal">/100</span>
+              </div>
+              <div className="text-[9px] uppercase tracking-wider text-neutral-600 mt-0.5 font-mono">today</div>
+            </div>
+            <div>
+              <div className="text-[10px] uppercase tracking-wider text-neutral-500 font-mono">Active burn</div>
+              <div className="font-mono text-2xl font-bold leading-tight text-neutral-50">
+                {o.active_burn_yesterday ?? '—'}<span className="text-[10px] text-neutral-500 ml-0.5 font-normal">cal</span>
+              </div>
+              <div className="text-[9px] uppercase tracking-wider text-neutral-600 mt-0.5 font-mono">yesterday</div>
+            </div>
+          </div>
+          {burnDaysPts.length >= 2 && (
+            <div>
+              <div className="flex items-baseline justify-between mb-1">
+                <div className="text-[10px] uppercase tracking-wider text-neutral-500 font-mono">7-day active burn</div>
+                <div className="text-[10px] text-neutral-500 font-mono">avg {o.active_burn_7d_avg} cal</div>
+              </div>
+              <Sparkline points={burnDaysPts} color="#a78bfa" height={28} />
+            </div>
+          )}
+          <div className="text-[10px] text-neutral-600 mt-2 font-mono uppercase tracking-wider">
+            TDEE {o.total_burn_7d_avg} · macros use this as your baseline
+          </div>
+        </button>
+      );
+    };
+
+    // ============================================================
     // STRENGTH EVOLUTION CARD
     // ============================================================
     const StrengthEvolutionCard = ({ state }) => {
@@ -860,6 +943,7 @@
           </div>
 
           <BodyCompositionCard state={state} onOpenSettings={onSettings} />
+          <RecoveryCard state={state} onOpenSettings={onSettings} />
           <StrengthEvolutionCard state={state} />
 
           <div className="text-xs uppercase tracking-[0.2em] text-neutral-500 font-mono mb-3">THIS WEEK</div>
@@ -913,7 +997,7 @@
             <div className="flex-1 min-w-0">
               <div className="text-xs uppercase tracking-wider text-neutral-500">Today's Diet</div>
               {(() => {
-                const t = computeMacroTargets(state.bodyStats);
+                const t = computeMacroTargets(state.bodyStats, state.oura);
                 const meals = state.mealsByDate?.[todayKey()] || [];
                 const sums = sumMeals(meals);
                 const remaining = Math.max(0, t.kcal - sums.kcal);
@@ -1324,7 +1408,7 @@
 
       const today = todayKey();
       const meals = (state.mealsByDate && state.mealsByDate[today]) || [];
-      const targets = computeMacroTargets(state.bodyStats);
+      const targets = computeMacroTargets(state.bodyStats, state.oura);
       const totals = sumMeals(meals);
       const remaining = Math.max(0, targets.kcal - totals.kcal);
 
@@ -1690,6 +1774,26 @@
         window.location.href = `/api/withings/auth?secret=${encodeURIComponent(secret)}`;
       };
 
+      const [ouraSyncing, setOuraSyncing] = useState(false);
+      const [ouraMsg, setOuraMsg] = useState(null);
+      const triggerOuraSync = async () => {
+        const secret = cloudSync.getSecret();
+        if (!secret) { setOuraMsg('Set your sync secret first.'); return; }
+        setOuraSyncing(true);
+        setOuraMsg(null);
+        try {
+          const r = await fetch('/api/oura/sync', { headers: { 'x-sync-secret': secret } });
+          const j = await r.json();
+          if (!r.ok) { setOuraMsg(j.error || `HTTP ${r.status}`); return; }
+          onUpdateState({ ...state, oura: j });
+          setOuraMsg(`Synced · TDEE ${j.total_burn_7d_avg} cal · readiness ${j.readiness_score_today ?? '—'}`);
+        } catch (e) {
+          setOuraMsg(String(e.message || e));
+        } finally {
+          setOuraSyncing(false);
+        }
+      };
+
       const triggerWithingsSync = async () => {
         const secret = cloudSync.getSecret();
         if (!secret) { setSyncMsg('Set your sync secret first.'); return; }
@@ -1730,7 +1834,7 @@
         }
       };
 
-      const targets = computeMacroTargets(bs);
+      const targets = computeMacroTargets(bs, state.oura);
 
       return (
         <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-5 mb-4">
@@ -1781,6 +1885,31 @@
             </div>
             {syncMsg && (
               <div className="text-[11px] text-neutral-400 mt-2 leading-snug">{syncMsg}</div>
+            )}
+          </div>
+
+          <div className="bg-neutral-900 border border-neutral-800 rounded-lg p-3 mb-4">
+            <div className="flex items-center justify-between mb-2">
+              <div className="text-[10px] uppercase tracking-widest text-neutral-500 font-mono">Oura</div>
+              {state.oura?.last_sync_at && (
+                <div className="text-[10px] uppercase tracking-wider text-green-400 font-mono">
+                  · Last sync {formatRelative(state.oura.last_sync_at)}
+                </div>
+              )}
+            </div>
+            <div className="text-[11px] text-neutral-400 mb-2 leading-snug">
+              Pulls active burn (replaces hardcoded TDEE), sleep, and readiness. Auto-syncs on app open.
+            </div>
+            <button onClick={triggerOuraSync} disabled={ouraSyncing}
+              className="w-full py-2.5 rounded-lg bg-orange-500 text-black uppercase tracking-wider text-[11px] font-bold hover:bg-orange-400 disabled:opacity-40 flex items-center justify-center gap-2">
+              {ouraSyncing ? (
+                <><div className="w-3 h-3 rounded-full border-2 border-black/30 border-t-black animate-spin" />Syncing</>
+              ) : (
+                <>Sync Oura now</>
+              )}
+            </button>
+            {ouraMsg && (
+              <div className="text-[11px] text-neutral-400 mt-2 leading-snug">{ouraMsg}</div>
             )}
           </div>
 
@@ -2065,14 +2194,14 @@
       }, [state]);
 
       // Auto-sync Withings once per session if it's been >6 days since the last sync.
-      const autoSyncedRef = React.useRef(false);
+      const autoSyncedWithingsRef = React.useRef(false);
       useEffect(() => {
-        if (autoSyncedRef.current) return;
+        if (autoSyncedWithingsRef.current) return;
         if (!state || !cloudSync.getSecret()) return;
         const last = state.bodyStats?.withingsLastSync;
-        if (!last) return; // never connected, skip
+        if (!last) return;
         if (Date.now() - last < 6 * 86_400_000) return;
-        autoSyncedRef.current = true;
+        autoSyncedWithingsRef.current = true;
         const secret = cloudSync.getSecret();
         fetch('/api/withings/sync', { headers: { 'x-sync-secret': secret } })
           .then(r => r.ok ? r.json() : null)
@@ -2096,6 +2225,25 @@
               ].slice(0, 365);
               return { ...prev, bodyStats: nextBs, bodyStatsHistory: history };
             });
+          })
+          .catch(() => {});
+      }, [state]);
+
+      // Auto-sync Oura once per session if it's been >6 hours since the last sync,
+      // or if never synced. Oura data updates daily; 6h captures morning refresh.
+      const autoSyncedOuraRef = React.useRef(false);
+      useEffect(() => {
+        if (autoSyncedOuraRef.current) return;
+        if (!state || !cloudSync.getSecret()) return;
+        const last = state.oura?.last_sync_at;
+        if (last && Date.now() - last < 6 * 3_600_000) return;
+        autoSyncedOuraRef.current = true;
+        const secret = cloudSync.getSecret();
+        fetch('/api/oura/sync', { headers: { 'x-sync-secret': secret } })
+          .then(r => r.ok ? r.json() : null)
+          .then(j => {
+            if (!j || !j.last_sync_at) return;
+            setState(prev => prev ? { ...prev, oura: j } : prev);
           })
           .catch(() => {});
       }, [state]);
