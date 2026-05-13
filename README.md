@@ -1,5 +1,4 @@
 # Iron Log
-
 Personal 4-day strength training tracker. Deploys to Vercel.
 
 ## Stack
