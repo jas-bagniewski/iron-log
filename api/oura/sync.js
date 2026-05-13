@@ -93,6 +93,7 @@ export default async function handler(req, res) {
   const yesterdayKey = isoDate(new Date(today.getTime() - 86_400_000));
 
   const todayReadiness = R.get(todayKey);
+  const todayActivity = A.get(todayKey);
   const yesterdayActivity = A.get(yesterdayKey);
   const yesterdaySleep = S.get(yesterdayKey);
 
@@ -109,6 +110,10 @@ export default async function handler(req, res) {
     total_burn_7d_avg,
     active_burn_yesterday: yesterdayActivity ? Math.round(yesterdayActivity.active_calories || 0) : null,
     total_burn_yesterday: yesterdayActivity ? Math.round(yesterdayActivity.total_calories || 0) : null,
+    // Today's data is partial - increases throughout the day. Useful for the
+    // "today so far" calorie balance card on Home.
+    active_burn_today: todayActivity ? Math.round(todayActivity.active_calories || 0) : null,
+    total_burn_today: todayActivity ? Math.round(todayActivity.total_calories || 0) : null,
     sleep_score_yesterday: yesterdaySleep ? yesterdaySleep.score : null,
     readiness_score_today: todayReadiness ? todayReadiness.score : null,
     days,
