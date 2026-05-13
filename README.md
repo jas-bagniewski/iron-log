@@ -1,76 +1,62 @@
 # Iron Log
-Personal 4-day strength training tracker. Deploys to Vercel.
 
-## Stack
+A personal strength training tracker with diet logging, body composition tracking, and adaptive macros. Mobile-first PWA, deploys to your own Vercel in ~15 minutes.
 
-- Static `index.html` with React 18 + Babel-standalone + Tailwind, all via CDN
-- Two Vercel serverless functions under `/api/` for cloud sync + coach share
-- Vercel KV (Upstash Redis) for cross-device state
-- `localStorage` as the offline cache on each device
+**Built for people who:**
+- Want a simple 5/3/1-style strength program with progress tracking
+- Want to log meals (photo or text → AI estimates macros) and track cut/maintain/bulk
+- Already use a Withings smart scale and/or an Oura ring and want the data fed back into their macro targets
+- Don't want to pay a SaaS subscription — own your code, own your data
 
-`vercel.json` skips a framework build — Vercel just serves the repo root as static files, with `/api/*` picked up automatically as serverless functions.
+## What you get
 
-> The `app/` and `lib/` Next.js code is **not built or deployed**. It's kept as a mirror of the program logic in `index.html` for a future revival. Keep both in sync when editing program data.
+- **Iron Log tab**: 4-day strength program (chest / full body / legs / back), 5/3/1 cycle with auto-bumping training maxes, AMRAP sets, accessory progression, history with session detail, per-exercise progress charts.
+- **Diet tab**: daily macro targets, meal logging via photo (Claude Haiku vision) or text ("4 boiled eggs"), pace calibration loop comparing last-7-days intake vs Oura burn.
+- **Home dashboard**: today's diet remaining, training maxes with e1RM, Oura recovery card (sleep + readiness + active burn), body composition trend.
+- **Coach Share Link**: read-only public URL for your PT to follow your training.
+- **Cross-device sync**: any number of phones/tablets/laptops via Vercel KV; each device just needs your sync secret.
 
-## How to edit the program
+## Cost to run
 
-Program data — accessories, day templates, week schemes, default training maxes — lives in **`index.html`** (the deployed app) and is mirrored in **`lib/program.ts`**. When you change one, change the other.
+| Service | Tier | Monthly cost |
+|---|---|---|
+| Vercel | Hobby | $0 |
+| Upstash KV | Free (10k cmds/day) | $0 |
+| Withings dev app | Free | $0 |
+| Oura Personal Access Token | Free | $0 |
+| Anthropic API (meal AI) | Pay-as-you-go | ~$1–5 |
 
-### Add an exercise
-1. Open `index.html`, find `const ACCESSORIES = {`, add an entry.
-2. Add its id to the relevant day in `DAY_TEMPLATES`.
-3. Mirror both changes in `lib/program.ts`.
+Total: **~$1–5/mo**, billed to your own card. No shared infra, no auth, no SaaS.
 
-### Change a rep range, set count, or weight increment
-Edit the entry in `ACCESSORIES` (both files).
+## Setup
 
-### Change the 5/3/1 percentages
-Edit `WEEK_SCHEMES` (both files).
+Two paths:
 
-## Cloud sync + coach share
+### Path A — let Claude Code do most of it (recommended)
+1. Fork this repo (top-right **Fork** on GitHub)
+2. Install [Claude Code](https://claude.ai/code) and `cd` into your fork
+3. Tell Claude: **`Follow SETUP.md to wire up my fork`**
+4. Answer the questions it asks (Anthropic key, Withings dev app, Oura token, your body stats)
 
-Two Vercel serverless functions:
+Claude will create the Vercel project, attach Upstash KV, set the env vars, register the providers, and deploy. End-to-end about 15 minutes.
 
-- `api/state.js` — owner read/write, guarded by `x-sync-secret` header against env `SYNC_SECRET`.
-- `api/share.js` — PT read-only, compares `?t=<token>` against `state.shareToken` stored in KV.
+### Path B — manual setup
+Read [`SETUP.md`](./SETUP.md) top to bottom. Same steps, you do them.
 
-### One-time setup in the Vercel dashboard
+## Customization
 
-1. **Project → Storage → Create → KV** (Upstash Redis). Attach it. Vercel auto-injects `KV_REST_API_URL` and `KV_REST_API_TOKEN`.
-2. **Project → Settings → Environment Variables**: add `SYNC_SECRET` = a strong random string.
+After setup, ask Claude Code (in your fork) things like:
+- *"Change me from a 4-day strength split to a 5-day PPL hypertrophy program"*
+- *"My goal is to bulk, not cut — adjust the macro formula"*
+- *"Swap dumbbell bench for floor press on chest day"*
+- *"Use kilos instead of pounds"*
 
-### On each owner device
+Edits land via PR, the workflow re-attributes the commit so your Vercel Hobby deploy accepts it, and you're live in 30 seconds. The full app architecture is documented in [`CLAUDE.md`](./CLAUDE.md) so Claude knows where to make changes.
 
-Open Settings → **Cloud Sync** → paste `SYNC_SECRET` → Save. The page pulls cloud state; subsequent edits debounce-push (~1.5 s after the last change). Status badge (top right of Home) shows `Synced`, `Syncing…`, `Local only`, `Sync error`, or `Bad secret`.
+## Architecture (one paragraph)
 
-### Sharing with a coach / PT
+`index.html` is the entire deployed app: React 18 + Tailwind + Babel-standalone via CDN, one big inline `<script type="text/babel">`. State persists to `localStorage` and mirrors to Vercel KV via `/api/state` (gated by your `SYNC_SECRET`). Coach share renders `share.html` via a `vercel.json` rewrite (`/share/:token` → `share.html`, fetched from `/api/share?t=…`). Meal vision goes through `/api/meal` (Claude Haiku via Anthropic API). Withings flow uses OAuth2 (`/api/withings/{auth,callback,sync}`), Oura uses a Personal Access Token (`/api/oura/sync`). The `app/` and `lib/` Next.js directories are an unused mirror kept for a possible future revival.
 
-Open Settings → **Coach Share Link** → Generate. Copy the URL (`https://<domain>/share/<token>`) and send it. It renders a read-only summary: training maxes, current cycle/week, current accessory weights, recent sessions. Rotate or Revoke from the same screen — old links die immediately.
+## License
 
-## Local development
-
-You can preview the static page directly:
-
-```bash
-python3 -m http.server 3000
-# or
-npx serve .
-```
-
-Cloud-sync API routes won't work locally unless you run via `vercel dev` with the env vars set. For UI-only work, the localStorage path is enough.
-
-## Deployment
-
-Deploys to Vercel automatically on push to `main`. Vercel redeploys in ~30 seconds.
-
-## Data storage
-
-Workout data lives in `localStorage` under `iron-log:v2`, and (when sync is enabled) in Vercel KV under `iron-log:state:v1`.
-
-To wipe local data:
-```js
-localStorage.removeItem("iron-log:v2")
-localStorage.removeItem("iron-log:syncSecret")
-```
-
-To wipe cloud data: in Vercel dashboard → KV → delete the key, or use Settings → Reset All Progress (which then syncs the empty state up).
+MIT. Fork it, change it, ship it.
