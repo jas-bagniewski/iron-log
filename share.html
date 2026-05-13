@@ -63,6 +63,44 @@
     };
 
     const estimate1RM = (w, r) => (!w || !r) ? null : Math.round(w * (1 + r / 30));
+
+    // Strength percentile standards (mirror of index.html). Reference at 185 lb, 30y male.
+    const STRENGTH_REF = {
+      bench:    [155, 200, 245, 295, 355],
+      squat:    [195, 250, 305, 365, 430],
+      deadlift: [240, 300, 365, 435, 510],
+    };
+    const STRENGTH_PCT = [5, 25, 50, 75, 95];
+    const ageFactor = (age) => Math.max(0.5, 1.0 - Math.max(0, (age || 30) - 30) * 0.0053);
+    const bwFactor = (bw) => Math.pow((bw || 185) / 185, 0.65);
+    const adjustedStandards = (lift, bw, age) => {
+      const ref = STRENGTH_REF[lift];
+      if (!ref) return null;
+      const scale = ageFactor(age) * bwFactor(bw);
+      return ref.map(v => Math.round(v * scale));
+    };
+    const computePercentile = (value, standards) => {
+      if (!value || !standards) return null;
+      if (value <= standards[0]) return Math.max(1, Math.round((value / standards[0]) * STRENGTH_PCT[0]));
+      for (let i = 0; i < standards.length - 1; i++) {
+        if (value <= standards[i + 1]) {
+          const frac = (value - standards[i]) / (standards[i + 1] - standards[i]);
+          return Math.round(STRENGTH_PCT[i] + frac * (STRENGTH_PCT[i + 1] - STRENGTH_PCT[i]));
+        }
+      }
+      const last = standards[standards.length - 1];
+      const overshoot = (value - last) / (last * 0.15);
+      return Math.min(99, 95 + Math.round(overshoot * 4));
+    };
+    const percentileLabel = (p) => {
+      if (p == null) return null;
+      if (p >= 95) return 'Elite';
+      if (p >= 75) return 'Advanced';
+      if (p >= 50) return 'Intermediate';
+      if (p >= 25) return 'Novice';
+      return 'Beginner';
+    };
+
     const bestE1RM = (history, lift) => {
       let best = 0;
       (history || []).forEach((s) => {
@@ -183,12 +221,21 @@
       const squatE = bestE1RM(s.history, "squat");
       const dlE = bestE1RM(s.history, "deadlift");
 
-      const tmBox = (label, val, best) => `
-        <div class="bg-neutral-950 border border-neutral-800 rounded-xl p-3">
-          <div class="text-[10px] uppercase tracking-wider text-neutral-500 mb-1">${label}</div>
-          <div class="font-mono text-xl font-bold text-neutral-50 leading-none">${val}<span class="text-neutral-500 text-xs ml-0.5 font-normal">lb</span></div>
-          ${best ? `<div class="text-[10px] text-neutral-500 mt-1 font-mono">est 1RM: ${best}</div>` : ''}
-        </div>`;
+      const bw = s.bodyStats && s.bodyStats.weight;
+      const tmBox = (label, val, best, liftId) => {
+        const standards = liftId ? adjustedStandards(liftId, bw, null) : null;
+        const value = best || val;
+        const pct = standards ? computePercentile(value, standards) : null;
+        const lbl = percentileLabel(pct);
+        const pctColor = pct == null ? 'text-neutral-500' : pct >= 75 ? 'text-green-400' : pct >= 50 ? 'text-orange-300' : pct >= 25 ? 'text-neutral-300' : 'text-red-400';
+        return `
+          <div class="bg-neutral-950 border border-neutral-800 rounded-xl p-3">
+            <div class="text-[10px] uppercase tracking-wider text-neutral-500 mb-1">${label}</div>
+            <div class="font-mono text-xl font-bold text-neutral-50 leading-none">${val}<span class="text-neutral-500 text-xs ml-0.5 font-normal">lb</span></div>
+            ${best ? `<div class="text-[10px] text-neutral-500 mt-1 font-mono">1RM ${best}</div>` : ''}
+            ${pct != null ? `<div class="text-[10px] mt-0.5 font-mono"><span class="font-bold ${pctColor}">${pct}<span class="text-[8px]">th</span></span><span class="text-neutral-600 ml-1 uppercase tracking-wider text-[9px]">${lbl}</span></div>` : ''}
+          </div>`;
+      };
 
       const doneBlock = Object.keys(DAY_NAMES).map((d) => {
         const done = s.completedThisWeek && s.completedThisWeek[d];
@@ -381,9 +428,9 @@
 
         <div class="text-xs uppercase tracking-[0.2em] text-neutral-500 font-mono mb-2">TRAINING MAXES</div>
         <div class="grid grid-cols-3 gap-2 mb-6">
-          ${tmBox("Bench", tm.bench, benchE)}
-          ${tmBox("Squat", tm.squat, squatE)}
-          ${tmBox("Deadlift", tm.deadlift, dlE)}
+          ${tmBox("Bench", tm.bench, benchE, 'bench')}
+          ${tmBox("Squat", tm.squat, squatE, 'squat')}
+          ${tmBox("Deadlift", tm.deadlift, dlE, 'deadlift')}
         </div>
 
         ${dietBlock}
