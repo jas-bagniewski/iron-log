@@ -238,7 +238,28 @@
       const lift = completed.mainLift;
       const amrap = (completed.mainSets || []).find((s) => s.isAmrap && s.actualReps);
 
-      const newE1RM = amrap ? estimate1RM(amrap.weight, amrap.actualReps) : null;
+      // Best e1RM across non-AMRAP completed sets too (lets us show a
+      // PR-week top set that beat the AMRAP, for example). Volume days are
+      // skipped entirely - the weights are sub-maximal by design (60% of TM)
+      // so any e1RM would be falsely low and overwrite accurate data.
+      let sessionBestE1RM = null, sessionBestSet = null;
+      if (!completed.isVolume) {
+        (completed.mainSets || []).forEach((set) => {
+          if (!set.completed || !set.weight) return;
+          const reps = set.isAmrap ? set.actualReps : set.targetReps;
+          if (!reps) return;
+          const e = estimate1RM(set.weight, reps);
+          if (e && (sessionBestE1RM == null || e > sessionBestE1RM)) {
+            sessionBestE1RM = e;
+            sessionBestSet = set;
+          }
+        });
+      }
+
+      // AMRAP-derived (only when AMRAP set exists). Distinct so we still show
+      // the AMRAP card prominently when present.
+      const amrapE1RM = amrap ? estimate1RM(amrap.weight, amrap.actualReps) : null;
+      const newE1RM = sessionBestE1RM ?? amrapE1RM;
       const prevBestE1RM = getBestE1RM(prevState.history, lift);
       const isPR = newE1RM != null && (prevBestE1RM == null || newE1RM > prevBestE1RM);
       const e1RMDelta = newE1RM != null && prevBestE1RM != null ? newE1RM - prevBestE1RM : null;
@@ -322,6 +343,7 @@
         mainLift: lift, mainName: completed.mainName,
         isVolume: completed.isVolume,
         amrap,
+        sessionBestE1RM, sessionBestSet, amrapE1RM,
         newE1RM, prevBestE1RM, e1RMDelta, isPR,
         newPct, prevPct, newBand, prevBand, bandJumped,
         intensityHint,
@@ -1387,6 +1409,11 @@
                   {pctChip(s.newPct, s.newBand)}
                 </div>
               )}
+              {s.sessionBestE1RM && s.amrapE1RM && s.sessionBestE1RM > s.amrapE1RM && s.sessionBestSet && (
+                <div className="text-[10px] text-neutral-500 mt-1 font-mono">
+                  Top set {s.sessionBestSet.weight}×{s.sessionBestSet.actualReps ?? s.sessionBestSet.targetReps} actually projected higher ({s.sessionBestE1RM})
+                </div>
+              )}
               {s.newPct != null && MUSCLE_GROUP_LABEL[s.mainLift] && (
                 <div className="text-[10px] text-neutral-500 font-mono uppercase tracking-wider mt-1">
                   {MUSCLE_GROUP_LABEL[s.mainLift]}: {s.newPct}th %ile{s.prevPct != null && s.newPct !== s.prevPct ? ` (was ${s.prevPct}th)` : ''}
@@ -1405,7 +1432,7 @@
               <div className="text-[10px] uppercase tracking-[0.2em] text-orange-400 font-semibold mb-1">VOLUME WORK</div>
               <div className="text-lg font-bold text-neutral-50 mb-2">{s.mainName}</div>
               <div className="text-xs text-neutral-400">
-                Speed and form day — no AMRAP. Light bench reinforces the groove without taxing recovery.
+                Speed and form day — sub-maximal by design. No e1RM or percentile update from this session (the weight is intentionally light at ~60% of TM so deriving a 1RM would falsely lower your numbers).
               </div>
             </div>
           )}
