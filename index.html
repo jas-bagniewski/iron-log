@@ -633,6 +633,68 @@
       };
     };
 
+    // Cumulative + per-day calorie balance (intake - burn). Last 7 full days,
+    // yesterday in isolation, and today-so-far prorated by time of day so the
+    // in-progress number is meaningful (you haven't burned a full day's TDEE
+    // by lunchtime).
+    const computeCalorieBalance = (state) => {
+      const today = new Date();
+      const ouraDays = (state.oura && state.oura.days) || [];
+      const burnByDate = new Map();
+      ouraDays.forEach((d) => { if (d && d.total_cal != null) burnByDate.set(d.date, d.total_cal); });
+      const fallbackTdee = computeMacroTargets(state.bodyStats, state.oura, null).maintenance;
+
+      // 7 full prior days (exclude today)
+      let cumIntake = 0, cumBurn = 0, daysWithData = 0;
+      const yesterdayKey = dateKey(new Date(today.getTime() - 86_400_000));
+      let yIntake = null, yBurn = null;
+      for (let i = 1; i <= 7; i++) {
+        const d = new Date(today); d.setDate(today.getDate() - i);
+        const k = dateKey(d);
+        const meals = (state.mealsByDate && state.mealsByDate[k]) || [];
+        const intake = meals.reduce((s, m) => s + (m.kcal || 0), 0);
+        const burn = burnByDate.has(k) ? burnByDate.get(k) : fallbackTdee;
+        if (intake > 0 || burnByDate.has(k)) {
+          cumIntake += intake;
+          cumBurn += burn;
+          daysWithData++;
+        }
+        if (k === yesterdayKey) {
+          yIntake = intake;
+          yBurn = burnByDate.has(k) ? burnByDate.get(k) : fallbackTdee;
+        }
+      }
+
+      // Today so far: prorate burn by time-of-day fraction (more honest than
+      // comparing partial intake to a full-day burn estimate).
+      const tKey = dateKey(today);
+      const todayMeals = (state.mealsByDate && state.mealsByDate[tKey]) || [];
+      const todayIntake = todayMeals.reduce((s, m) => s + (m.kcal || 0), 0);
+      const fractionOfDay = (today.getHours() * 60 + today.getMinutes()) / (24 * 60);
+      // If Oura has a (partial) total_cal for today, prefer that. Otherwise
+      // estimate today's burn so far as fractionOfDay * average daily burn.
+      const ouraToday = state.oura && state.oura.total_burn_today;
+      const todayBurnSoFar = ouraToday != null ? ouraToday : Math.round(fallbackTdee * fractionOfDay);
+
+      return {
+        cumulative: {
+          intake: cumIntake, burn: cumBurn, net: cumIntake - cumBurn, days: daysWithData,
+        },
+        yesterday: {
+          date: yesterdayKey,
+          intake: yIntake, burn: yBurn,
+          net: yIntake != null && yBurn != null ? yIntake - yBurn : null,
+          hasIntake: yIntake != null && yIntake > 0,
+        },
+        today: {
+          intake: todayIntake, burn: todayBurnSoFar,
+          net: todayIntake - todayBurnSoFar,
+          fractionOfDay,
+          fromOura: ouraToday != null,
+        },
+      };
+    };
+
     const sumMeals = (meals) => {
       const t = { kcal: 0, protein: 0, carbs: 0, fat: 0 };
       (meals || []).forEach(m => {
@@ -1296,6 +1358,63 @@
     };
 
     // ============================================================
+    // CALORIE BALANCE CARD (7-day cumulative + yesterday + today so far)
+    // ============================================================
+    const CalorieBalanceCard = ({ state, onOpenDiet }) => {
+      const bal = computeCalorieBalance(state);
+      const fmt = (n) => n == null ? '—' : `${n > 0 ? '+' : ''}${Math.round(n)}`;
+      const netColor = (n) => {
+        if (n == null) return 'text-neutral-500';
+        if (n < -100) return 'text-orange-300';   // deficit
+        if (n > 100)  return 'text-blue-300';     // surplus
+        return 'text-green-400';                  // maintenance window
+      };
+      const ouraConnected = !!(state.oura && state.oura.last_sync_at);
+      const haveAnyMeals = bal.cumulative.days > 0 || bal.today.intake > 0;
+      if (!haveAnyMeals && !ouraConnected) {
+        return (
+          <button onClick={onOpenDiet} className="w-full text-left bg-neutral-950 border border-neutral-800 rounded-xl p-4 mb-3 hover:border-neutral-700 active:scale-[0.99]">
+            <div className="text-[10px] uppercase tracking-[0.2em] text-neutral-500 font-mono mb-2">CALORIE BALANCE</div>
+            <div className="text-sm text-neutral-400">Log meals and connect Oura to see your deficit/surplus.</div>
+          </button>
+        );
+      }
+      return (
+        <button onClick={onOpenDiet} className="w-full text-left bg-neutral-950 border border-neutral-800 rounded-xl p-4 mb-3 hover:border-neutral-700 active:scale-[0.99]">
+          <div className="flex items-center justify-between mb-3">
+            <div className="text-[10px] uppercase tracking-[0.2em] text-neutral-500 font-mono">CALORIE BALANCE</div>
+            <div className="text-[10px] uppercase tracking-wider text-neutral-600 font-mono">in − out</div>
+          </div>
+          <div className="grid grid-cols-3 gap-2">
+            <div>
+              <div className="text-[10px] uppercase tracking-wider text-neutral-500 font-mono">Today</div>
+              <div className={`font-mono text-xl font-bold leading-tight ${netColor(bal.today.net)}`}>{fmt(bal.today.net)}</div>
+              <div className="text-[9px] uppercase tracking-wider text-neutral-600 font-mono mt-0.5">
+                {Math.round(bal.today.intake)} in · {Math.round(bal.today.burn)} out{bal.today.fromOura ? '' : ' (est)'}
+              </div>
+            </div>
+            <div>
+              <div className="text-[10px] uppercase tracking-wider text-neutral-500 font-mono">Yesterday</div>
+              <div className={`font-mono text-xl font-bold leading-tight ${netColor(bal.yesterday.net)}`}>
+                {bal.yesterday.hasIntake ? fmt(bal.yesterday.net) : '—'}
+              </div>
+              <div className="text-[9px] uppercase tracking-wider text-neutral-600 font-mono mt-0.5">
+                {bal.yesterday.hasIntake ? `${Math.round(bal.yesterday.intake)} in · ${Math.round(bal.yesterday.burn)} out` : 'no meals logged'}
+              </div>
+            </div>
+            <div>
+              <div className="text-[10px] uppercase tracking-wider text-neutral-500 font-mono">7-day</div>
+              <div className={`font-mono text-xl font-bold leading-tight ${netColor(bal.cumulative.net)}`}>{fmt(bal.cumulative.net)}</div>
+              <div className="text-[9px] uppercase tracking-wider text-neutral-600 font-mono mt-0.5">
+                {bal.cumulative.days}/7 days · ≈{(Math.abs(bal.cumulative.net) / 3500).toFixed(1)} lb {bal.cumulative.net < 0 ? 'loss' : 'gain'}
+              </div>
+            </div>
+          </div>
+        </button>
+      );
+    };
+
+    // ============================================================
     // TODAY'S DIET TILE (extracted; shown at top of Home)
     // ============================================================
     const TodayDietTile = ({ state, onOpenDiet }) => {
@@ -1370,6 +1489,7 @@
           </div>
 
           <TodayDietTile state={state} onOpenDiet={onDiet} />
+          <CalorieBalanceCard state={state} onOpenDiet={onDiet} />
           <StrengthEvolutionCard state={state} />
           <RecoveryCard state={state} onOpenSettings={onSettings} />
           <BodyCompositionCard state={state} onOpenSettings={onSettings} />
