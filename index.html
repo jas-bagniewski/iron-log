@@ -100,6 +100,8 @@
     const Trash = (p) => <Icon {...p}><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></Icon>;
     const X = (p) => <Icon {...p}><path d="M18 6 6 18"/><path d="m6 6 12 12"/></Icon>;
     const Loader = (p) => <Icon {...p}><line x1="12" x2="12" y1="2" y2="6"/><line x1="12" x2="12" y1="18" y2="22"/><line x1="4.93" x2="7.76" y1="4.93" y2="7.76"/><line x1="16.24" x2="19.07" y1="16.24" y2="19.07"/><line x1="2" x2="6" y1="12" y2="12"/><line x1="18" x2="22" y1="12" y2="12"/><line x1="4.93" x2="7.76" y1="19.07" y2="16.24"/><line x1="16.24" x2="19.07" y1="7.76" y2="4.93"/></Icon>;
+    const Home = (p) => <Icon {...p}><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></Icon>;
+    const BarChart = (p) => <Icon {...p}><line x1="12" x2="12" y1="20" y2="10"/><line x1="18" x2="18" y1="20" y2="4"/><line x1="6" x2="6" y1="20" y2="16"/></Icon>;
 
     // ============================================================
     // PROGRAM DEFINITIONS
@@ -958,7 +960,7 @@
     };
 
     // ============================================================
-    // STRENGTH EVOLUTION CARD
+    // STRENGTH EVOLUTION CARD (TMs + e1RM merged)
     // ============================================================
     const StrengthEvolutionCard = ({ state }) => {
       const history = state.trainingMaxesHistory || [];
@@ -967,9 +969,9 @@
       const squatPts = sparkPoints(history, 'squat');
       const dlPts = sparkPoints(history, 'deadlift');
       const lifts = [
-        { id: 'bench',    label: 'Bench',    pts: benchPts, val: tm.bench,    color: '#F97316' },
-        { id: 'squat',    label: 'Squat',    pts: squatPts, val: tm.squat,    color: '#84cc16' },
-        { id: 'deadlift', label: 'Deadlift', pts: dlPts,    val: tm.deadlift, color: '#a78bfa' },
+        { id: 'bench',    label: 'Bench',    pts: benchPts, val: tm.bench,    e1RM: getBestE1RM(state.history, 'bench'),    color: '#F97316' },
+        { id: 'squat',    label: 'Squat',    pts: squatPts, val: tm.squat,    e1RM: getBestE1RM(state.history, 'squat'),    color: '#84cc16' },
+        { id: 'deadlift', label: 'Deadlift', pts: dlPts,    val: tm.deadlift, e1RM: getBestE1RM(state.history, 'deadlift'), color: '#a78bfa' },
       ];
       return (
         <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-4 mb-3">
@@ -983,9 +985,12 @@
               return (
                 <div key={l.id}>
                   <div className="text-[10px] uppercase tracking-wider text-neutral-500 font-mono">{l.label}</div>
-                  <div className="flex items-baseline gap-1 mb-1">
+                  <div className="flex items-baseline gap-1 mb-0.5">
                     <div className="font-mono text-xl font-bold text-neutral-50">{l.val}</div>
                     <div className="text-[10px] text-neutral-500">lb</div>
+                  </div>
+                  <div className="text-[9px] uppercase tracking-wider text-neutral-600 font-mono mb-1">
+                    {l.e1RM ? `est 1RM ${l.e1RM}` : 'no AMRAP yet'}
                   </div>
                   <Sparkline points={l.pts} color={l.color} height={28} />
                   <div className="text-[10px] text-neutral-500 font-mono mt-1">{delta}</div>
@@ -994,6 +999,39 @@
             })}
           </div>
         </div>
+      );
+    };
+
+    // ============================================================
+    // TODAY'S DIET TILE (extracted; shown at top of Home)
+    // ============================================================
+    const TodayDietTile = ({ state, onOpenDiet }) => {
+      const t = computeMacroTargets(state.bodyStats, state.oura, computeWeeklyPace(state));
+      const meals = state.mealsByDate?.[todayKey()] || [];
+      const sums = sumMeals(meals);
+      const remaining = Math.max(0, t.kcal - sums.kcal);
+      const over = sums.kcal > t.kcal;
+      return (
+        <button onClick={onOpenDiet} className="w-full bg-neutral-950 border border-neutral-800 rounded-xl p-4 flex items-center gap-3 hover:border-neutral-700 active:scale-[0.99] text-left mb-3">
+          <div className="w-10 h-10 rounded-lg bg-orange-500/10 border border-orange-500/30 flex items-center justify-center shrink-0">
+            <Utensils size={18} className="text-orange-400" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="text-xs uppercase tracking-wider text-neutral-500">Today's Diet</div>
+            <div className="flex items-baseline gap-2">
+              <div className="font-mono text-2xl font-bold text-neutral-50">{over ? `+${sums.kcal - t.kcal}` : remaining}</div>
+              <div className="text-xs text-neutral-500 font-mono">
+                {over ? 'cal over' : 'cal left'} · {meals.length} meal{meals.length === 1 ? '' : 's'}
+                {t.adjustment !== 0 && (
+                  <span className={t.adjustment < 0 ? 'text-orange-300 ml-1' : 'text-blue-300 ml-1'}>
+                    ({t.adjustment > 0 ? '+' : ''}{t.adjustment} pace)
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+          <ArrowRight size={16} className="text-neutral-600 shrink-0" />
+        </button>
       );
     };
 
@@ -1015,123 +1053,33 @@
       );
     };
 
-    const HomeView = ({ state, syncStatus, onStart, onHistory, onSettings, onDiet }) => {
-      const total = state.history?.length || 0;
-      const benchE = getBestE1RM(state.history, 'bench');
-      const squatE = getBestE1RM(state.history, 'squat');
-      const dlE = getBestE1RM(state.history, 'deadlift');
-
+    const HomeView = ({ state, syncStatus, onSettings, onDiet }) => {
       return (
-        <div className="px-5 pb-24 pt-8 max-w-2xl mx-auto">
-          <div className="flex items-center justify-between mb-8">
+        <div className="px-5 pb-28 pt-8 max-w-2xl mx-auto">
+          <div className="flex items-center justify-between mb-6">
             <div className="flex items-center gap-2.5">
               <div className="w-10 h-10 bg-orange-500 rounded-lg flex items-center justify-center">
                 <Dumbbell size={22} strokeWidth={2.5} className="text-black" />
               </div>
               <div>
                 <div className="font-display text-2xl tracking-wider leading-none">IRON LOG</div>
-                <div className="text-[10px] uppercase tracking-widest text-neutral-500 font-mono mt-1">4-DAY STRENGTH</div>
+                <div className="text-[10px] uppercase tracking-widest text-neutral-500 font-mono mt-1">
+                  CYCLE {state.cycle} · WEEK {state.week} · {WEEK_SCHEMES[state.week].label}
+                </div>
               </div>
             </div>
             <div className="flex gap-2 items-center">
               <SyncBadge status={syncStatus} />
-              <button onClick={onDiet} className="w-10 h-10 rounded-lg border border-neutral-800 flex items-center justify-center text-neutral-400 hover:text-neutral-100 hover:border-neutral-700">
-                <Utensils size={18} />
-              </button>
-              <button onClick={onHistory} className="w-10 h-10 rounded-lg border border-neutral-800 flex items-center justify-center text-neutral-400 hover:text-neutral-100 hover:border-neutral-700">
-                <History size={18} />
-              </button>
               <button onClick={onSettings} className="w-10 h-10 rounded-lg border border-neutral-800 flex items-center justify-center text-neutral-400 hover:text-neutral-100 hover:border-neutral-700">
                 <Settings size={18} />
               </button>
             </div>
           </div>
 
-          <div className="flex items-center gap-3 mb-6">
-            <div className="text-xs uppercase tracking-[0.2em] text-neutral-500 font-mono">
-              CYCLE {state.cycle} · WEEK {state.week} OF 4
-            </div>
-            <div className="flex-1 h-px bg-neutral-800" />
-            <div className="text-xs uppercase tracking-[0.2em] font-mono text-orange-400">
-              {WEEK_SCHEMES[state.week].label}
-            </div>
-          </div>
-
-          <BodyCompositionCard state={state} onOpenSettings={onSettings} />
-          <RecoveryCard state={state} onOpenSettings={onSettings} />
-          <PaceCard state={state} onOpenDiet={onDiet} />
+          <TodayDietTile state={state} onOpenDiet={onDiet} />
           <StrengthEvolutionCard state={state} />
-
-          <div className="text-xs uppercase tracking-[0.2em] text-neutral-500 font-mono mb-3">THIS WEEK</div>
-          <div className="grid grid-cols-2 gap-3 mb-6">
-            {DAY_ORDER.map(dayId => {
-              const tpl = DAY_TEMPLATES[dayId];
-              const done = state.completedThisWeek[dayId];
-              return (
-                <button key={dayId} onClick={() => onStart(dayId)}
-                  className={`relative text-left p-4 rounded-xl border transition-all active:scale-[0.98] ${
-                    done ? 'bg-neutral-950 border-green-900/40' : 'bg-gradient-to-br from-neutral-950 to-neutral-900 border-neutral-800 hover:border-orange-500/50'
-                  }`}>
-                  {done && (
-                    <div className="absolute top-3 right-3 w-6 h-6 rounded-full bg-green-500/20 border border-green-500/40 flex items-center justify-center">
-                      <Check size={12} className="text-green-400" strokeWidth={3} />
-                    </div>
-                  )}
-                  <div className="font-display text-2xl tracking-wide leading-none mb-2 text-neutral-50">
-                    {tpl.name.split(' ')[0].toUpperCase()}
-                  </div>
-                  <div className="text-[10px] uppercase tracking-wider text-neutral-500 font-mono">{tpl.mainName}</div>
-                  {!done && (
-                    <div className="mt-3 text-xs uppercase tracking-wider text-orange-400 font-semibold flex items-center gap-1">
-                      Start <ArrowRight size={12} strokeWidth={3} />
-                    </div>
-                  )}
-                </button>
-              );
-            })}
-          </div>
-
-          {(benchE || squatE || dlE) && (
-            <div className="grid grid-cols-3 gap-2 mb-3">
-              {[
-                { label: 'Bench e1RM', v: benchE },
-                { label: 'Squat e1RM', v: squatE },
-                { label: 'DL e1RM',    v: dlE },
-              ].map((s, i) => (
-                <div key={i} className="bg-neutral-950 border border-neutral-800 rounded-lg p-2.5 text-center">
-                  <div className="text-[9px] uppercase tracking-wider text-neutral-500 font-mono">{s.label}</div>
-                  <div className="font-mono text-lg font-bold text-neutral-50 leading-tight">{s.v || '—'}<span className="text-[10px] text-neutral-500 ml-0.5">lb</span></div>
-                </div>
-              ))}
-            </div>
-          )}
-
-          <button onClick={onDiet} className="w-full bg-neutral-950 border border-neutral-800 rounded-xl p-4 flex items-center gap-3 hover:border-neutral-700 active:scale-[0.99] text-left mb-3">
-            <div className="w-10 h-10 rounded-lg bg-orange-500/10 border border-orange-500/30 flex items-center justify-center shrink-0">
-              <Utensils size={18} className="text-orange-400" />
-            </div>
-            <div className="flex-1 min-w-0">
-              <div className="text-xs uppercase tracking-wider text-neutral-500">Today's Diet</div>
-              {(() => {
-                const t = computeMacroTargets(state.bodyStats, state.oura, computeWeeklyPace(state));
-                const meals = state.mealsByDate?.[todayKey()] || [];
-                const sums = sumMeals(meals);
-                const remaining = Math.max(0, t.kcal - sums.kcal);
-                const over = sums.kcal > t.kcal;
-                return (
-                  <div className="flex items-baseline gap-2">
-                    <div className="font-mono text-2xl font-bold text-neutral-50">
-                      {over ? `+${sums.kcal - t.kcal}` : remaining}
-                    </div>
-                    <div className="text-xs text-neutral-500 font-mono">
-                      {over ? 'cal over' : 'cal left'} · {meals.length} meal{meals.length === 1 ? '' : 's'}
-                    </div>
-                  </div>
-                );
-              })()}
-            </div>
-            <ArrowRight size={16} className="text-neutral-600 shrink-0" />
-          </button>
+          <RecoveryCard state={state} onOpenSettings={onSettings} />
+          <BodyCompositionCard state={state} onOpenSettings={onSettings} />
         </div>
       );
     };
@@ -1553,19 +1501,17 @@
       const modeColor = { cut: 'text-orange-400', maintain: 'text-neutral-300', bulk: 'text-green-400' }[targets.mode];
 
       return (
-        <div className="px-5 pb-32 pt-6 max-w-2xl mx-auto">
-          <div className="flex items-center justify-between mb-6">
-            <button onClick={onBack} className="flex items-center gap-1 text-neutral-400 hover:text-neutral-100 text-sm uppercase tracking-wider">
-              <ChevronLeft size={18} /> Back
-            </button>
+        <div className="px-5 pt-6 max-w-2xl mx-auto" style={{ paddingBottom: 'calc(11rem + env(safe-area-inset-bottom))' }}>
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <div className="font-display text-3xl tracking-wide text-neutral-50">DIET</div>
+              <div className="text-sm text-neutral-500">
+                {new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })}
+              </div>
+            </div>
             <div className={`text-xs uppercase tracking-[0.2em] font-mono ${modeColor}`}>
               {modeLabel} · {state.bodyStats?.bodyFatPct || '—'}% → {state.bodyStats?.goalBodyFatPct || '—'}%
             </div>
-          </div>
-
-          <div className="font-display text-4xl tracking-wide text-neutral-50 mb-1">DIET</div>
-          <div className="text-sm text-neutral-500 mb-6">
-            {new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })}
           </div>
 
           <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-5 mb-4">
@@ -1601,6 +1547,8 @@
               </div>
             )}
           </div>
+
+          <PaceCard state={state} onOpenDiet={() => {}} />
 
           <div className="flex items-center justify-between mb-3">
             <div className="text-xs uppercase tracking-[0.2em] text-neutral-500 font-mono">TODAY'S MEALS</div>
@@ -1643,10 +1591,10 @@
             </div>
           )}
 
-          <div className="fixed bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-black via-black/95 to-transparent" style={{ paddingBottom: 'calc(1rem + env(safe-area-inset-bottom))' }}>
+          <div className="fixed left-0 right-0 px-4 pt-6 pb-3 bg-gradient-to-t from-black via-black/95 to-transparent z-20" style={{ bottom: 'calc(60px + env(safe-area-inset-bottom))' }}>
             <div className="max-w-2xl mx-auto">
               <button onClick={() => setAdding(true)}
-                className="w-full py-5 rounded-xl font-bold uppercase tracking-[0.15em] text-sm bg-orange-500 hover:bg-orange-400 text-black active:scale-[0.99] flex items-center justify-center gap-2">
+                className="w-full py-4 rounded-xl font-bold uppercase tracking-[0.15em] text-sm bg-orange-500 hover:bg-orange-400 text-black active:scale-[0.99] flex items-center justify-center gap-2 shadow-lg shadow-orange-500/20">
                 <Plus size={18} strokeWidth={3} /> Add Meal
               </button>
             </div>
@@ -1654,6 +1602,224 @@
 
           {adding && <AddMealView onSave={addMeal} onCancel={() => setAdding(false)} />}
           {editing && <EditMealView meal={editing} onSave={saveEdit} onDelete={deleteMeal} onCancel={() => setEditing(null)} />}
+        </div>
+      );
+    };
+
+    // ============================================================
+    // PROGRESS LIST (per-exercise line charts)
+    // ============================================================
+    const buildExerciseSeries = (history) => {
+      const ordered = (history || []).slice().reverse(); // oldest first
+      const series = new Map(); // key -> { type, name, points: [{ts, value, label}] }
+      ordered.forEach((s) => {
+        if (!s || !s.completedAt) return;
+        const ts = new Date(s.completedAt).getTime();
+        if (!ts) return;
+        const amrap = s.mainSets?.find(set => set.isAmrap && set.actualReps);
+        if (amrap && s.mainLift && s.mainName) {
+          const key = `main:${s.mainLift}`;
+          if (!series.has(key)) series.set(key, { type: 'main', name: s.mainName, points: [] });
+          series.get(key).points.push({
+            ts,
+            value: estimate1RM(amrap.weight, amrap.actualReps),
+            label: `${amrap.weight}×${amrap.actualReps}`,
+          });
+        }
+        (s.accessories || []).forEach((acc) => {
+          const reps = (acc.setData || []).map(x => x.reps).filter(r => r != null);
+          if (reps.length === 0) return;
+          const topReps = Math.max(...reps);
+          let value, label;
+          if (acc.isBodyweight) {
+            value = topReps;
+            label = `${topReps} reps`;
+          } else if (acc.isTimed) {
+            value = topReps; // seconds
+            label = `${topReps}s`;
+          } else {
+            value = (acc.weight || 0) * topReps;
+            label = `${acc.weight}×${topReps}`;
+          }
+          const key = `acc:${acc.id}`;
+          if (!series.has(key)) series.set(key, { type: acc.isBodyweight ? 'bw' : acc.isTimed ? 'timed' : 'acc', name: acc.name, points: [] });
+          series.get(key).points.push({ ts, value, label });
+        });
+      });
+      return series;
+    };
+
+    const ProgressList = ({ state }) => {
+      const series = buildExerciseSeries(state.history);
+      const entries = Array.from(series.entries()).filter(([, v]) => v.points.length >= 2);
+      if (entries.length === 0) {
+        return (
+          <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-8 text-center">
+            <BarChart size={28} className="text-neutral-700 mx-auto mb-3" />
+            <div className="text-neutral-500 text-sm">Log at least 2 sessions to see progress charts.</div>
+          </div>
+        );
+      }
+      // Order: main lifts first (in DAY_ORDER's lift order), then accessories
+      const mainOrder = ['bench', 'squat', 'deadlift'];
+      entries.sort(([a], [b]) => {
+        const aIsMain = a.startsWith('main:'), bIsMain = b.startsWith('main:');
+        if (aIsMain && !bIsMain) return -1;
+        if (bIsMain && !aIsMain) return 1;
+        if (aIsMain && bIsMain) {
+          return mainOrder.indexOf(a.split(':')[1]) - mainOrder.indexOf(b.split(':')[1]);
+        }
+        return 0;
+      });
+      return (
+        <div className="space-y-3">
+          {entries.map(([key, s]) => {
+            const pts = s.points;
+            const first = pts[0];
+            const last = pts[pts.length - 1];
+            const delta = last.value - first.value;
+            const color = s.type === 'main' ? '#F97316' : s.type === 'bw' ? '#60a5fa' : s.type === 'timed' ? '#a78bfa' : '#84cc16';
+            const unit = s.type === 'main' ? 'est 1RM lb'
+                       : s.type === 'bw'   ? 'reps'
+                       : s.type === 'timed'? 'sec'
+                       :                     'lb·reps';
+            return (
+              <div key={key} className="bg-neutral-950 border border-neutral-800 rounded-xl p-4">
+                <div className="flex items-baseline justify-between mb-1 gap-3">
+                  <div className="font-bold text-neutral-50 truncate">{s.name}</div>
+                  <div className="text-[10px] uppercase tracking-wider text-neutral-500 font-mono shrink-0">
+                    {Math.round(last.value).toLocaleString()} <span className="text-neutral-600">{unit}</span>
+                  </div>
+                </div>
+                <Sparkline points={pts} color={color} height={44} />
+                <div className="flex items-center justify-between mt-2 text-[10px] text-neutral-500 font-mono uppercase tracking-wider">
+                  <span>{pts.length} sessions</span>
+                  <span className={delta > 0 ? 'text-green-400' : delta < 0 ? 'text-red-400' : 'text-neutral-500'}>
+                    {delta > 0 ? '+' : ''}{Math.round(delta).toLocaleString()} since first
+                  </span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      );
+    };
+
+    // ============================================================
+    // IRON LOG VIEW (Train / Progress / History sub-tabs)
+    // ============================================================
+    const IronLogView = ({ state, onStart, onSettings }) => {
+      const [sub, setSub] = useState('train'); // train | progress | history
+      const [historyFilter, setHistoryFilter] = useState('all');
+      const [selected, setSelected] = useState(null);
+
+      if (selected) {
+        return <SessionDetailView session={selected} onBack={() => setSelected(null)} />;
+      }
+
+      const history = state.history || [];
+      const filtered = historyFilter === 'all' ? history : history.filter(s => s.dayId === historyFilter);
+
+      return (
+        <div className="px-5 pb-28 pt-6 max-w-2xl mx-auto">
+          <div className="flex items-center justify-between mb-4">
+            <div className="font-display text-3xl tracking-wide text-neutral-50">IRON LOG</div>
+            <div className="text-[10px] uppercase tracking-[0.2em] font-mono text-neutral-500">
+              C{state.cycle}·W{state.week} · {WEEK_SCHEMES[state.week].label}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-3 gap-2 mb-6">
+            {[['train', 'Train'], ['progress', 'Progress'], ['history', 'History']].map(([id, label]) => (
+              <button key={id} onClick={() => setSub(id)}
+                className={`py-2.5 rounded-lg text-xs uppercase tracking-wider font-mono border transition-all ${
+                  sub === id ? 'bg-orange-500 text-black border-orange-500 font-bold' : 'bg-neutral-950 text-neutral-400 border-neutral-800 hover:border-neutral-700'
+                }`}>{label}</button>
+            ))}
+          </div>
+
+          {sub === 'train' && (
+            <>
+              <div className="text-xs uppercase tracking-[0.2em] text-neutral-500 font-mono mb-3">THIS WEEK</div>
+              <div className="grid grid-cols-2 gap-3 mb-4">
+                {DAY_ORDER.map(dayId => {
+                  const tpl = DAY_TEMPLATES[dayId];
+                  const done = state.completedThisWeek[dayId];
+                  return (
+                    <button key={dayId} onClick={() => onStart(dayId)}
+                      className={`relative text-left p-4 rounded-xl border transition-all active:scale-[0.98] ${
+                        done ? 'bg-neutral-950 border-green-900/40' : 'bg-gradient-to-br from-neutral-950 to-neutral-900 border-neutral-800 hover:border-orange-500/50'
+                      }`}>
+                      {done && (
+                        <div className="absolute top-3 right-3 w-6 h-6 rounded-full bg-green-500/20 border border-green-500/40 flex items-center justify-center">
+                          <Check size={12} className="text-green-400" strokeWidth={3} />
+                        </div>
+                      )}
+                      <div className="font-display text-2xl tracking-wide leading-none mb-2 text-neutral-50">
+                        {tpl.name.split(' ')[0].toUpperCase()}
+                      </div>
+                      <div className="text-[10px] uppercase tracking-wider text-neutral-500 font-mono">{tpl.mainName}</div>
+                      {!done && (
+                        <div className="mt-3 text-xs uppercase tracking-wider text-orange-400 font-semibold flex items-center gap-1">
+                          Start <ArrowRight size={12} strokeWidth={3} />
+                        </div>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </>
+          )}
+
+          {sub === 'progress' && <ProgressList state={state} />}
+
+          {sub === 'history' && (
+            <>
+              <div className="flex gap-2 mb-4 flex-wrap">
+                {['all', ...DAY_ORDER].map(f => (
+                  <button key={f} onClick={() => setHistoryFilter(f)}
+                    className={`px-3 py-1.5 rounded-lg text-xs uppercase tracking-wider font-mono border transition-all ${
+                      historyFilter === f ? 'bg-orange-500 text-black border-orange-500 font-bold' : 'bg-neutral-950 text-neutral-400 border-neutral-800 hover:border-neutral-700'
+                    }`}>
+                    {f === 'all' ? 'All' : DAY_TEMPLATES[f].name.split(' ')[0]}
+                  </button>
+                ))}
+              </div>
+              {filtered.length === 0 ? (
+                <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-8 text-center">
+                  <div className="text-neutral-500 text-sm">No sessions yet.</div>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {filtered.map((s, i) => {
+                    const amrap = s.mainSets?.find(set => set.isAmrap && set.actualReps);
+                    return (
+                      <button key={i} onClick={() => setSelected(s)} className="w-full text-left bg-neutral-950 border border-neutral-800 rounded-lg p-4 hover:border-neutral-700 active:scale-[0.99]">
+                        <div className="flex items-start justify-between mb-1 gap-3">
+                          <div className="min-w-0">
+                            <div className="font-semibold text-neutral-50">{s.name}</div>
+                            <div className="text-xs text-neutral-500 font-mono">
+                              C{s.cycle}·W{s.week} · {s.completedAt ? new Date(s.completedAt).toLocaleDateString() : ''}
+                            </div>
+                          </div>
+                          {amrap && (
+                            <div className="text-right shrink-0">
+                              <div className="font-mono text-orange-400 font-bold">{amrap.weight}×{amrap.actualReps}</div>
+                              <div className="text-[10px] uppercase tracking-wider text-neutral-500">{s.mainLift}</div>
+                            </div>
+                          )}
+                        </div>
+                        <div className="text-xs text-neutral-500 mt-2 flex items-center justify-between">
+                          <span>{s.accessories?.length || 0} accessories · {s.mainSets?.filter(x => x.completed).length || 0} main sets</span>
+                          <ChevronRight size={14} className="text-neutral-600" />
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </>
+          )}
         </div>
       );
     };
@@ -1767,72 +1933,6 @@
                 })}
               </div>
             </>
-          )}
-        </div>
-      );
-    };
-
-    // ============================================================
-    // HISTORY VIEW
-    // ============================================================
-    const HistoryView = ({ state, onBack }) => {
-      const [filter, setFilter] = useState('all');
-      const [selected, setSelected] = useState(null);
-      const history = state.history || [];
-      const filtered = filter === 'all' ? history : history.filter(s => s.dayId === filter);
-
-      if (selected) {
-        return <SessionDetailView session={selected} onBack={() => setSelected(null)} />;
-      }
-
-      return (
-        <div className="px-5 pb-24 pt-6 max-w-2xl mx-auto">
-          <button onClick={onBack} className="flex items-center gap-1 text-neutral-400 hover:text-neutral-100 text-sm uppercase tracking-wider mb-6">
-            <ChevronLeft size={18} /> Back
-          </button>
-          <div className="font-display text-3xl tracking-wide text-neutral-50 mb-6">HISTORY</div>
-          <div className="flex gap-2 mb-6 flex-wrap">
-            {['all', ...DAY_ORDER].map(f => (
-              <button key={f} onClick={() => setFilter(f)}
-                className={`px-3 py-1.5 rounded-lg text-xs uppercase tracking-wider font-mono border transition-all ${
-                  filter === f ? 'bg-orange-500 text-black border-orange-500 font-bold' : 'bg-neutral-950 text-neutral-400 border-neutral-800 hover:border-neutral-700'
-                }`}>
-                {f === 'all' ? 'All' : DAY_TEMPLATES[f].name.split(' ')[0]}
-              </button>
-            ))}
-          </div>
-          {filtered.length === 0 ? (
-            <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-8 text-center">
-              <div className="text-neutral-500 text-sm">No sessions yet.</div>
-            </div>
-          ) : (
-            <div className="space-y-2">
-              {filtered.map((s, i) => {
-                const amrap = s.mainSets?.find(set => set.isAmrap && set.actualReps);
-                return (
-                  <button key={i} onClick={() => setSelected(s)} className="w-full text-left bg-neutral-950 border border-neutral-800 rounded-lg p-4 hover:border-neutral-700 active:scale-[0.99]">
-                    <div className="flex items-start justify-between mb-1 gap-3">
-                      <div className="min-w-0">
-                        <div className="font-semibold text-neutral-50">{s.name}</div>
-                        <div className="text-xs text-neutral-500 font-mono">
-                          C{s.cycle}·W{s.week} · {s.completedAt ? new Date(s.completedAt).toLocaleDateString() : ''}
-                        </div>
-                      </div>
-                      {amrap && (
-                        <div className="text-right shrink-0">
-                          <div className="font-mono text-orange-400 font-bold">{amrap.weight}×{amrap.actualReps}</div>
-                          <div className="text-[10px] uppercase tracking-wider text-neutral-500">{s.mainLift}</div>
-                        </div>
-                      )}
-                    </div>
-                    <div className="text-xs text-neutral-500 mt-2 flex items-center justify-between">
-                      <span>{s.accessories?.length || 0} accessories · {s.mainSets?.filter(x => x.completed).length || 0} main sets</span>
-                      <ChevronRight size={14} className="text-neutral-600" />
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
           )}
         </div>
       );
@@ -2389,9 +2489,9 @@
       const handleComplete = (session) => {
         setState(finishSession(state, session));
         setActiveDayId(null);
-        setView('home');
+        setView('log'); // back to Iron Log tab where you started
       };
-      const handleCancel = () => setView('home');
+      const handleCancel = () => setView('log');
 
       // Called from Settings after the secret changes or a manual pull is requested.
       const handleResync = async () => {
@@ -2409,13 +2509,45 @@
         }
       };
 
+      const tabBarVisible = view === 'home' || view === 'log' || view === 'diet';
+
       return (
         <div className="min-h-screen bg-black text-neutral-100">
-          {view === 'home' && <HomeView state={state} syncStatus={syncStatus} onStart={handleStart} onHistory={() => setView('history')} onSettings={() => setView('settings')} onDiet={() => setView('diet')} />}
-          {view === 'session' && activeDayId && <SessionView state={state} dayId={activeDayId} onComplete={handleComplete} onCancel={handleCancel} onUpdateState={setState} />}
-          {view === 'history' && <HistoryView state={state} onBack={() => setView('home')} />}
+          {view === 'home' && <HomeView state={state} syncStatus={syncStatus} onSettings={() => setView('settings')} onDiet={() => setView('diet')} />}
+          {view === 'log' && <IronLogView state={state} onStart={handleStart} onSettings={() => setView('settings')} />}
           {view === 'diet' && <DietView state={state} onBack={() => setView('home')} onUpdateState={setState} />}
+          {view === 'session' && activeDayId && <SessionView state={state} dayId={activeDayId} onComplete={handleComplete} onCancel={handleCancel} onUpdateState={setState} />}
           {view === 'settings' && <SettingsView state={state} syncStatus={syncStatus} onBack={() => setView('home')} onUpdateState={setState} onResync={handleResync} />}
+          {tabBarVisible && <TabBar current={view} onChange={setView} />}
+        </div>
+      );
+    };
+
+    // ============================================================
+    // BOTTOM TAB BAR
+    // ============================================================
+    const TabBar = ({ current, onChange }) => {
+      const tabs = [
+        { id: 'home', label: 'Home',    icon: Home },
+        { id: 'log',  label: 'Iron Log',icon: Dumbbell },
+        { id: 'diet', label: 'Diet',    icon: Utensils },
+      ];
+      return (
+        <div className="fixed bottom-0 left-0 right-0 bg-black/95 backdrop-blur border-t border-neutral-800 z-30"
+             style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
+          <div className="max-w-2xl mx-auto grid grid-cols-3">
+            {tabs.map(t => {
+              const Ic = t.icon;
+              const active = current === t.id;
+              return (
+                <button key={t.id} onClick={() => onChange(t.id)}
+                  className={`flex flex-col items-center justify-center py-2.5 gap-1 ${active ? 'text-orange-400' : 'text-neutral-500 hover:text-neutral-200'}`}>
+                  <Ic size={20} strokeWidth={active ? 2.5 : 2} />
+                  <div className={`text-[10px] uppercase tracking-wider font-mono ${active ? 'font-bold' : ''}`}>{t.label}</div>
+                </button>
+              );
+            })}
+          </div>
         </div>
       );
     };
