@@ -94,6 +94,12 @@
     const Calendar = (p) => <Icon {...p}><rect width="18" height="18" x="3" y="4" rx="2" ry="2"/><line x1="16" x2="16" y1="2" y2="6"/><line x1="8" x2="8" y1="2" y2="6"/><line x1="3" x2="21" y1="10" y2="10"/></Icon>;
     const History = (p) => <Icon {...p}><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/></Icon>;
     const Settings = (p) => <Icon {...p}><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></Icon>;
+    const Utensils = (p) => <Icon {...p}><path d="M3 2v7c0 1.1.9 2 2 2h4a2 2 0 0 0 2-2V2"/><path d="M7 2v20"/><path d="M21 15V2a5 5 0 0 0-5 5v6c0 1.1.9 2 2 2h3Zm0 0v7"/></Icon>;
+    const Camera = (p) => <Icon {...p}><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/><circle cx="12" cy="13" r="3"/></Icon>;
+    const Edit2 = (p) => <Icon {...p}><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></Icon>;
+    const Trash = (p) => <Icon {...p}><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></Icon>;
+    const X = (p) => <Icon {...p}><path d="M18 6 6 18"/><path d="m6 6 12 12"/></Icon>;
+    const Loader = (p) => <Icon {...p}><line x1="12" x2="12" y1="2" y2="6"/><line x1="12" x2="12" y1="18" y2="22"/><line x1="4.93" x2="7.76" y1="4.93" y2="7.76"/><line x1="16.24" x2="19.07" y1="16.24" y2="19.07"/><line x1="2" x2="6" y1="12" y2="12"/><line x1="18" x2="22" y1="12" y2="12"/><line x1="4.93" x2="7.76" y1="19.07" y2="16.24"/><line x1="16.24" x2="19.07" y1="7.76" y2="4.93"/></Icon>;
 
     // ============================================================
     // PROGRAM DEFINITIONS
@@ -242,6 +248,11 @@
     // ============================================================
     const STORAGE_KEY = 'iron-log:v2';
     const SECRET_KEY = 'iron-log:syncSecret';
+    const defaultBodyStats = {
+      weight: 185, bodyFatPct: 18, goalBodyFatPct: 15,
+      height: 71, age: 45, sex: 'male', activityLevel: 'active',
+      lastUpdated: null,
+    };
     const defaultState = {
       // Calibrated 2026-05: bench 1RM 225, squat 155x5 (~181 e1RM), DL 165x10 hex (~220 e1RM).
       trainingMaxes: { bench: 200, squat: 165, deadlift: 200 },
@@ -249,19 +260,107 @@
       completedThisWeek: { chest: false, fullbody: false, legs: false, back: false },
       accessoryLog: {}, history: [], activeSession: null,
       shareToken: null,
+      bodyStats: defaultBodyStats,
+      bodyStatsHistory: [], // [{ date, weight, bodyFatPct, source }]
+      mealsByDate: {}, // 'YYYY-MM-DD': [{ id, name, items, kcal, protein, carbs, fat, source, loggedAt }]
+    };
+
+    // ============================================================
+    // DIET / MACRO TARGETS
+    // ============================================================
+    const ACTIVITY_MULTIPLIERS = {
+      sedentary: 1.2, light: 1.375, moderate: 1.55, active: 1.725, very_active: 1.9,
+    };
+    const ACTIVITY_LABELS = {
+      sedentary: 'Sedentary', light: 'Light', moderate: 'Moderate', active: 'Active', very_active: 'Very Active',
+    };
+
+    // Katch-McArdle if BF% known, else Mifflin-St Jeor. Then activity-adjusted, then
+    // shifted by ±300/±200 cal based on current vs goal BF.
+    const computeMacroTargets = (bs) => {
+      const stats = { ...defaultBodyStats, ...bs };
+      const weightKg = stats.weight * 0.4536;
+      const heightCm = stats.height * 2.54;
+      let bmr;
+      if (stats.bodyFatPct && stats.bodyFatPct > 3 && stats.bodyFatPct < 60) {
+        const leanKg = weightKg * (1 - stats.bodyFatPct / 100);
+        bmr = 370 + 21.6 * leanKg;
+      } else {
+        bmr = 10 * weightKg + 6.25 * heightCm - 5 * stats.age + (stats.sex === 'female' ? -161 : 5);
+      }
+      const tdee = bmr * (ACTIVITY_MULTIPLIERS[stats.activityLevel] || 1.55);
+      const bfDelta = (stats.bodyFatPct || 18) - (stats.goalBodyFatPct || 15);
+      let kcal, proteinPerLb, mode;
+      if (bfDelta > 1) { kcal = tdee - 300; proteinPerLb = 1.15; mode = 'cut'; }
+      else if (bfDelta < -1) { kcal = tdee + 200; proteinPerLb = 1.0; mode = 'bulk'; }
+      else { kcal = tdee; proteinPerLb = 1.05; mode = 'maintain'; }
+      const protein = Math.round(stats.weight * proteinPerLb);
+      const fat = Math.round(stats.weight * 0.4);
+      const carbCal = Math.max(0, kcal - protein * 4 - fat * 9);
+      const carbs = Math.round(carbCal / 4);
+      return {
+        kcal: Math.round(kcal), protein, fat, carbs,
+        maintenance: Math.round(tdee), bmr: Math.round(bmr), mode,
+      };
+    };
+
+    const todayKey = () => {
+      const d = new Date();
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    };
+
+    const sumMeals = (meals) => {
+      const t = { kcal: 0, protein: 0, carbs: 0, fat: 0 };
+      (meals || []).forEach(m => {
+        t.kcal += m.kcal || 0;
+        t.protein += m.protein || 0;
+        t.carbs += m.carbs || 0;
+        t.fat += m.fat || 0;
+      });
+      return t;
+    };
+
+    const fileToBase64 = (file) => new Promise((res, rej) => {
+      const r = new FileReader();
+      r.onload = () => {
+        const s = r.result;
+        const comma = s.indexOf(',');
+        res({ data: s.slice(comma + 1), mediaType: file.type || 'image/jpeg' });
+      };
+      r.onerror = rej;
+      r.readAsDataURL(file);
+    });
+
+    const analyzeMealPhoto = async (file) => {
+      const { data, mediaType } = await fileToBase64(file);
+      const secret = cloudSync.getSecret();
+      const r = await fetch('/api/meal', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(secret ? { 'x-sync-secret': secret } : {}) },
+        body: JSON.stringify({ imageBase64: data, mediaType }),
+      });
+      if (!r.ok) {
+        const j = await r.json().catch(() => ({}));
+        throw new Error(j.error || `HTTP ${r.status}`);
+      }
+      return r.json();
     };
     const loadState = () => {
       try {
         const raw = localStorage.getItem(STORAGE_KEY);
         if (raw) {
           const parsed = JSON.parse(raw);
-          // One-time TM recalibration (2026-05): if state still has the original
-          // placeholder maxes, replace them with the calibrated values.
           const tm = parsed.trainingMaxes;
           if (tm && tm.bench === 230 && tm.squat === 250 && tm.deadlift === 295) {
             parsed.trainingMaxes = { bench: 200, squat: 165, deadlift: 200 };
           }
-          return { ...defaultState, ...parsed };
+          return {
+            ...defaultState,
+            ...parsed,
+            bodyStats: { ...defaultBodyStats, ...(parsed.bodyStats || {}) },
+            mealsByDate: parsed.mealsByDate || {},
+            bodyStatsHistory: parsed.bodyStatsHistory || [],
+          };
         }
       } catch (e) {}
       return defaultState;
@@ -540,7 +639,7 @@
       );
     };
 
-    const HomeView = ({ state, syncStatus, onStart, onHistory, onSettings }) => {
+    const HomeView = ({ state, syncStatus, onStart, onHistory, onSettings, onDiet }) => {
       const total = state.history?.length || 0;
       const benchE = getBestE1RM(state.history, 'bench');
       const squatE = getBestE1RM(state.history, 'squat');
@@ -560,6 +659,9 @@
             </div>
             <div className="flex gap-2 items-center">
               <SyncBadge status={syncStatus} />
+              <button onClick={onDiet} className="w-10 h-10 rounded-lg border border-neutral-800 flex items-center justify-center text-neutral-400 hover:text-neutral-100 hover:border-neutral-700">
+                <Utensils size={18} />
+              </button>
               <button onClick={onHistory} className="w-10 h-10 rounded-lg border border-neutral-800 flex items-center justify-center text-neutral-400 hover:text-neutral-100 hover:border-neutral-700">
                 <History size={18} />
               </button>
@@ -615,7 +717,7 @@
             <StatBox label="Deadlift" value={state.trainingMaxes.deadlift} best={dlE} />
           </div>
 
-          <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-4 flex items-center gap-3">
+          <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-4 flex items-center gap-3 mb-4">
             <div className="w-10 h-10 rounded-lg bg-orange-500/10 border border-orange-500/30 flex items-center justify-center">
               <Award size={18} className="text-orange-400" />
             </div>
@@ -624,6 +726,33 @@
               <div className="font-mono text-2xl font-bold text-neutral-50">{total}</div>
             </div>
           </div>
+
+          <button onClick={onDiet} className="w-full bg-neutral-950 border border-neutral-800 rounded-xl p-4 flex items-center gap-3 hover:border-neutral-700 active:scale-[0.99] text-left">
+            <div className="w-10 h-10 rounded-lg bg-orange-500/10 border border-orange-500/30 flex items-center justify-center shrink-0">
+              <Utensils size={18} className="text-orange-400" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="text-xs uppercase tracking-wider text-neutral-500">Today's Diet</div>
+              {(() => {
+                const t = computeMacroTargets(state.bodyStats);
+                const meals = state.mealsByDate?.[todayKey()] || [];
+                const sums = sumMeals(meals);
+                const remaining = Math.max(0, t.kcal - sums.kcal);
+                const over = sums.kcal > t.kcal;
+                return (
+                  <div className="flex items-baseline gap-2">
+                    <div className="font-mono text-2xl font-bold text-neutral-50">
+                      {over ? `+${sums.kcal - t.kcal}` : remaining}
+                    </div>
+                    <div className="text-xs text-neutral-500 font-mono">
+                      {over ? 'cal over' : 'cal left'} · {meals.length} meal{meals.length === 1 ? '' : 's'}
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
+            <ArrowRight size={16} className="text-neutral-600 shrink-0" />
+          </button>
         </div>
       );
     };
@@ -714,6 +843,379 @@
     };
 
     // ============================================================
+    // DIET — MACRO BAR
+    // ============================================================
+    const MacroBar = ({ label, current, target, unit = 'g', accent = 'orange' }) => {
+      const pct = target > 0 ? Math.min(100, (current / target) * 100) : 0;
+      const remaining = Math.max(0, target - current);
+      const over = current > target;
+      const accentBg = over ? 'bg-red-500' : (accent === 'orange' ? 'bg-orange-500' : `bg-${accent}-500`);
+      const accentText = over ? 'text-red-400' : (accent === 'orange' ? 'text-orange-400' : `text-${accent}-400`);
+      return (
+        <div>
+          <div className="flex items-baseline justify-between mb-1.5">
+            <div className="text-[10px] uppercase tracking-widest text-neutral-500 font-mono">{label}</div>
+            <div className="font-mono text-sm">
+              <span className="text-neutral-100 font-bold">{Math.round(current)}</span>
+              <span className="text-neutral-500"> / {target}{unit}</span>
+              <span className={`ml-2 text-[10px] ${accentText}`}>
+                {over ? `+${Math.round(current - target)} over` : `${Math.round(remaining)} left`}
+              </span>
+            </div>
+          </div>
+          <div className="h-2 bg-neutral-900 rounded-full overflow-hidden">
+            <div className={`h-full ${accentBg} transition-all duration-300`} style={{ width: `${pct}%` }} />
+          </div>
+        </div>
+      );
+    };
+
+    // ============================================================
+    // MEAL EDIT FORM (shared between manual-add and photo-confirm)
+    // ============================================================
+    const MealEditForm = ({ initial, onSave, onCancel, photoPending = false, savingLabel = 'Log meal' }) => {
+      const [name, setName] = useState(initial?.name || '');
+      const [kcal, setKcal] = useState(initial?.kcal ?? '');
+      const [protein, setProtein] = useState(initial?.protein ?? '');
+      const [carbs, setCarbs] = useState(initial?.carbs ?? '');
+      const [fat, setFat] = useState(initial?.fat ?? '');
+
+      useEffect(() => {
+        if (initial) {
+          setName(initial.name || '');
+          setKcal(initial.kcal ?? '');
+          setProtein(initial.protein ?? '');
+          setCarbs(initial.carbs ?? '');
+          setFat(initial.fat ?? '');
+        }
+      }, [initial]);
+
+      const submit = () => {
+        const n = (name || '').trim() || 'Meal';
+        onSave({
+          name: n,
+          kcal: parseInt(kcal, 10) || 0,
+          protein: parseInt(protein, 10) || 0,
+          carbs: parseInt(carbs, 10) || 0,
+          fat: parseInt(fat, 10) || 0,
+          items: initial?.items || null,
+        });
+      };
+
+      const numField = (label, val, onChange, hint) => (
+        <div>
+          <div className="text-[10px] uppercase tracking-wider text-neutral-500 font-mono mb-1">{label}</div>
+          <input type="number" inputMode="numeric" value={val} onChange={(e) => onChange(e.target.value)}
+            className="w-full bg-neutral-900 border border-neutral-800 focus:border-orange-500 rounded-lg px-3 py-3 text-neutral-50 font-mono text-xl font-bold text-center outline-none" />
+          {hint && <div className="text-[9px] text-neutral-600 mt-1 text-center">{hint}</div>}
+        </div>
+      );
+
+      return (
+        <div>
+          <div className="mb-4">
+            <div className="text-[10px] uppercase tracking-wider text-neutral-500 font-mono mb-1">Meal</div>
+            <input type="text" value={name} onChange={(e) => setName(e.target.value)}
+              placeholder="e.g. Chicken & rice"
+              className="w-full bg-neutral-900 border border-neutral-800 focus:border-orange-500 rounded-lg px-3 py-3 text-neutral-50 outline-none" />
+          </div>
+          <div className="grid grid-cols-4 gap-2 mb-4">
+            {numField('Cal', kcal, setKcal)}
+            {numField('Pro', protein, setProtein, 'g')}
+            {numField('Carb', carbs, setCarbs, 'g')}
+            {numField('Fat', fat, setFat, 'g')}
+          </div>
+          {initial?.items && initial.items.length > 0 && (
+            <div className="bg-neutral-900 border border-neutral-800 rounded-lg p-3 mb-4">
+              <div className="text-[10px] uppercase tracking-wider text-neutral-500 font-mono mb-2">Identified items</div>
+              {initial.items.map((it, i) => (
+                <div key={i} className="text-xs text-neutral-300 flex justify-between py-0.5">
+                  <span>{it.food}{it.portion ? ` · ${it.portion}` : ''}</span>
+                  <span className="font-mono text-neutral-500">{it.kcal} cal</span>
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="flex gap-2">
+            <button onClick={onCancel} disabled={photoPending}
+              className="flex-1 py-3 rounded-lg border border-neutral-800 text-neutral-400 uppercase tracking-wider text-sm font-semibold hover:bg-neutral-900 disabled:opacity-40">
+              Cancel
+            </button>
+            <button onClick={submit} disabled={photoPending}
+              className="flex-1 py-3 rounded-lg bg-orange-500 text-black uppercase tracking-wider text-sm font-bold hover:bg-orange-400 disabled:opacity-40">
+              {savingLabel}
+            </button>
+          </div>
+        </div>
+      );
+    };
+
+    // ============================================================
+    // ADD MEAL VIEW
+    // ============================================================
+    const AddMealView = ({ onSave, onCancel }) => {
+      const [mode, setMode] = useState('choose'); // choose | manual | photo-pending | photo-confirm
+      const [analyzed, setAnalyzed] = useState(null);
+      const [error, setError] = useState(null);
+      const fileRef = React.useRef(null);
+
+      const triggerPhoto = () => {
+        setError(null);
+        fileRef.current?.click();
+      };
+
+      const handleFile = async (e) => {
+        const file = e.target.files?.[0];
+        e.target.value = ''; // allow re-pick same file
+        if (!file) return;
+        setMode('photo-pending');
+        setError(null);
+        try {
+          const result = await analyzeMealPhoto(file);
+          const total = result.total || {};
+          setAnalyzed({
+            name: result.name || 'Meal',
+            kcal: total.kcal || 0,
+            protein: total.protein_g || 0,
+            carbs: total.carbs_g || 0,
+            fat: total.fat_g || 0,
+            items: result.items || [],
+          });
+          setMode('photo-confirm');
+        } catch (e) {
+          setError(e.message || 'Photo analysis failed');
+          setMode('choose');
+        }
+      };
+
+      const finalSave = (meal) => {
+        onSave({
+          ...meal,
+          source: mode === 'photo-confirm' ? 'photo' : 'manual',
+        });
+      };
+
+      return (
+        <div className="fixed inset-0 bg-black/90 z-40 overflow-y-auto" onClick={onCancel}>
+          <div className="min-h-full flex items-start sm:items-center justify-center p-4 pt-10 sm:pt-4">
+            <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-5 w-full max-w-md" onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-center justify-between mb-5">
+                <div className="font-display text-2xl tracking-wide text-neutral-50">ADD MEAL</div>
+                <button onClick={onCancel} className="w-9 h-9 rounded-lg border border-neutral-800 flex items-center justify-center text-neutral-400 hover:text-neutral-100">
+                  <X size={16} />
+                </button>
+              </div>
+
+              <input ref={fileRef} type="file" accept="image/*" capture="environment" onChange={handleFile} className="hidden" />
+
+              {error && (
+                <div className="mb-4 px-3 py-2 rounded-lg border border-red-900/40 bg-red-950/30 text-red-300 text-xs">
+                  {error}
+                </div>
+              )}
+
+              {mode === 'choose' && (
+                <div className="space-y-3">
+                  <button onClick={triggerPhoto}
+                    className="w-full p-5 rounded-xl border border-neutral-800 hover:border-orange-500/50 bg-gradient-to-br from-neutral-950 to-neutral-900 text-left flex items-center gap-4 active:scale-[0.99]">
+                    <div className="w-12 h-12 rounded-lg bg-orange-500/10 border border-orange-500/30 flex items-center justify-center shrink-0">
+                      <Camera size={22} className="text-orange-400" />
+                    </div>
+                    <div>
+                      <div className="font-bold text-neutral-50">Photo</div>
+                      <div className="text-xs text-neutral-500 mt-0.5">Snap or upload — AI estimates macros</div>
+                    </div>
+                  </button>
+                  <button onClick={() => setMode('manual')}
+                    className="w-full p-5 rounded-xl border border-neutral-800 hover:border-orange-500/50 bg-gradient-to-br from-neutral-950 to-neutral-900 text-left flex items-center gap-4 active:scale-[0.99]">
+                    <div className="w-12 h-12 rounded-lg bg-neutral-900 border border-neutral-800 flex items-center justify-center shrink-0">
+                      <Edit2 size={20} className="text-neutral-300" />
+                    </div>
+                    <div>
+                      <div className="font-bold text-neutral-50">Manual entry</div>
+                      <div className="text-xs text-neutral-500 mt-0.5">Type in macros directly</div>
+                    </div>
+                  </button>
+                </div>
+              )}
+
+              {mode === 'photo-pending' && (
+                <div className="py-10 flex flex-col items-center gap-3">
+                  <div className="w-12 h-12 rounded-full border-2 border-orange-500/30 border-t-orange-500 animate-spin" />
+                  <div className="text-sm text-neutral-400 uppercase tracking-widest font-mono">Analyzing photo…</div>
+                  <div className="text-xs text-neutral-600">Usually ~5 seconds</div>
+                </div>
+              )}
+
+              {mode === 'photo-confirm' && analyzed && (
+                <div>
+                  <div className="text-xs text-neutral-500 mb-3">Review and adjust — tap any number to edit.</div>
+                  <MealEditForm initial={analyzed} onSave={finalSave} onCancel={() => setMode('choose')} savingLabel="Log meal" />
+                </div>
+              )}
+
+              {mode === 'manual' && (
+                <MealEditForm initial={{}} onSave={finalSave} onCancel={() => setMode('choose')} savingLabel="Log meal" />
+              )}
+            </div>
+          </div>
+        </div>
+      );
+    };
+
+    // ============================================================
+    // EDIT MEAL VIEW (for already-logged meals)
+    // ============================================================
+    const EditMealView = ({ meal, onSave, onDelete, onCancel }) => {
+      return (
+        <div className="fixed inset-0 bg-black/90 z-40 overflow-y-auto" onClick={onCancel}>
+          <div className="min-h-full flex items-start sm:items-center justify-center p-4 pt-10 sm:pt-4">
+            <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-5 w-full max-w-md" onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-center justify-between mb-5">
+                <div className="font-display text-2xl tracking-wide text-neutral-50">EDIT MEAL</div>
+                <button onClick={onCancel} className="w-9 h-9 rounded-lg border border-neutral-800 flex items-center justify-center text-neutral-400 hover:text-neutral-100">
+                  <X size={16} />
+                </button>
+              </div>
+              <MealEditForm initial={meal} onSave={onSave} onCancel={onCancel} savingLabel="Save" />
+              <button onClick={onDelete}
+                className="w-full mt-3 py-3 rounded-lg border border-red-900/40 text-red-400 uppercase tracking-wider text-sm font-semibold hover:bg-red-950/30 flex items-center justify-center gap-2">
+                <Trash size={14} /> Delete meal
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    };
+
+    // ============================================================
+    // DIET VIEW
+    // ============================================================
+    const DietView = ({ state, onBack, onUpdateState }) => {
+      const [adding, setAdding] = useState(false);
+      const [editing, setEditing] = useState(null); // meal object or null
+
+      const today = todayKey();
+      const meals = (state.mealsByDate && state.mealsByDate[today]) || [];
+      const targets = computeMacroTargets(state.bodyStats);
+      const totals = sumMeals(meals);
+      const remaining = Math.max(0, targets.kcal - totals.kcal);
+
+      const addMeal = (meal) => {
+        const id = `m-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+        const entry = { id, ...meal, loggedAt: new Date().toISOString() };
+        const list = [...meals, entry];
+        onUpdateState({ ...state, mealsByDate: { ...(state.mealsByDate || {}), [today]: list } });
+        setAdding(false);
+      };
+      const saveEdit = (updated) => {
+        if (!editing) return;
+        const list = meals.map(m => m.id === editing.id ? { ...m, ...updated } : m);
+        onUpdateState({ ...state, mealsByDate: { ...(state.mealsByDate || {}), [today]: list } });
+        setEditing(null);
+      };
+      const deleteMeal = () => {
+        if (!editing) return;
+        const list = meals.filter(m => m.id !== editing.id);
+        onUpdateState({ ...state, mealsByDate: { ...(state.mealsByDate || {}), [today]: list } });
+        setEditing(null);
+      };
+
+      const modeLabel = { cut: 'CUT', maintain: 'MAINTAIN', bulk: 'BULK' }[targets.mode];
+      const modeColor = { cut: 'text-orange-400', maintain: 'text-neutral-300', bulk: 'text-green-400' }[targets.mode];
+
+      return (
+        <div className="px-5 pb-32 pt-6 max-w-2xl mx-auto">
+          <div className="flex items-center justify-between mb-6">
+            <button onClick={onBack} className="flex items-center gap-1 text-neutral-400 hover:text-neutral-100 text-sm uppercase tracking-wider">
+              <ChevronLeft size={18} /> Back
+            </button>
+            <div className={`text-xs uppercase tracking-[0.2em] font-mono ${modeColor}`}>
+              {modeLabel} · {state.bodyStats?.bodyFatPct || '—'}% → {state.bodyStats?.goalBodyFatPct || '—'}%
+            </div>
+          </div>
+
+          <div className="font-display text-4xl tracking-wide text-neutral-50 mb-1">DIET</div>
+          <div className="text-sm text-neutral-500 mb-6">
+            {new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })}
+          </div>
+
+          <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-5 mb-4">
+            <div className="flex items-baseline justify-between mb-1">
+              <div className="text-[10px] uppercase tracking-widest text-neutral-500 font-mono">CALORIES REMAINING</div>
+              <div className="text-[10px] uppercase tracking-wider text-neutral-600 font-mono">target {targets.kcal}</div>
+            </div>
+            <div className="flex items-baseline gap-2 mb-5">
+              <div className="font-mono text-5xl font-bold text-neutral-50 leading-none">
+                {totals.kcal > targets.kcal ? `+${totals.kcal - targets.kcal}` : remaining}
+              </div>
+              <div className="text-sm text-neutral-500 font-mono">{totals.kcal > targets.kcal ? 'over' : 'cal left'}</div>
+            </div>
+            <div className="space-y-3">
+              <MacroBar label="Calories" current={totals.kcal} target={targets.kcal} unit="" />
+              <MacroBar label="Protein" current={totals.protein} target={targets.protein} />
+              <MacroBar label="Carbs"   current={totals.carbs}   target={targets.carbs} />
+              <MacroBar label="Fat"     current={totals.fat}     target={targets.fat} />
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between mb-3">
+            <div className="text-xs uppercase tracking-[0.2em] text-neutral-500 font-mono">TODAY'S MEALS</div>
+            <div className="text-[10px] uppercase tracking-wider text-neutral-600 font-mono">{meals.length} logged</div>
+          </div>
+
+          {meals.length === 0 ? (
+            <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-8 text-center mb-4">
+              <Utensils size={28} className="text-neutral-700 mx-auto mb-3" />
+              <div className="text-neutral-500 text-sm">No meals logged yet.</div>
+              <div className="text-neutral-600 text-xs mt-1">Tap the + button below to add one.</div>
+            </div>
+          ) : (
+            <div className="space-y-2 mb-4">
+              {meals.map(m => (
+                <button key={m.id} onClick={() => setEditing(m)}
+                  className="w-full text-left bg-neutral-950 border border-neutral-800 rounded-lg p-4 hover:border-neutral-700 active:scale-[0.99]">
+                  <div className="flex items-start justify-between mb-1.5 gap-3">
+                    <div className="min-w-0 flex-1">
+                      <div className="font-semibold text-neutral-50 truncate">{m.name}</div>
+                      <div className="text-[10px] text-neutral-600 font-mono uppercase tracking-wider mt-0.5">
+                        {m.source === 'photo' ? 'Photo' : 'Manual'} · {new Date(m.loggedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
+                      </div>
+                    </div>
+                    <div className="font-mono text-orange-400 font-bold text-lg shrink-0">{m.kcal}<span className="text-[10px] text-neutral-500 ml-1">cal</span></div>
+                  </div>
+                  <div className="flex gap-3 text-[10px] font-mono text-neutral-500 uppercase tracking-wider">
+                    <span>P {m.protein}g</span>
+                    <span>C {m.carbs}g</span>
+                    <span>F {m.fat}g</span>
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+
+          {!state.bodyStats?.lastUpdated && (
+            <div className="bg-orange-950/20 border border-orange-900/40 rounded-lg p-3 mb-4 text-xs text-orange-200">
+              Set your weight + body fat % in Settings → Body Stats to dial in macro targets.
+            </div>
+          )}
+
+          <div className="fixed bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-black via-black/95 to-transparent" style={{ paddingBottom: 'calc(1rem + env(safe-area-inset-bottom))' }}>
+            <div className="max-w-2xl mx-auto">
+              <button onClick={() => setAdding(true)}
+                className="w-full py-5 rounded-xl font-bold uppercase tracking-[0.15em] text-sm bg-orange-500 hover:bg-orange-400 text-black active:scale-[0.99] flex items-center justify-center gap-2">
+                <Plus size={18} strokeWidth={3} /> Add Meal
+              </button>
+            </div>
+          </div>
+
+          {adding && <AddMealView onSave={addMeal} onCancel={() => setAdding(false)} />}
+          {editing && <EditMealView meal={editing} onSave={saveEdit} onDelete={deleteMeal} onCancel={() => setEditing(null)} />}
+        </div>
+      );
+    };
+
+    // ============================================================
     // HISTORY VIEW
     // ============================================================
     const HistoryView = ({ state, onBack }) => {
@@ -769,6 +1271,119 @@
               })}
             </div>
           )}
+        </div>
+      );
+    };
+
+    // ============================================================
+    // BODY STATS CARD (in Settings)
+    // ============================================================
+    const BodyStatsCard = ({ state, onUpdateState }) => {
+      const bs = state.bodyStats || defaultBodyStats;
+      const [weightStr, setWeightStr] = useState(String(bs.weight));
+      const [bfStr, setBfStr] = useState(String(bs.bodyFatPct ?? ''));
+      const [saved, setSaved] = useState(false);
+
+      useEffect(() => {
+        setWeightStr(String(bs.weight));
+        setBfStr(String(bs.bodyFatPct ?? ''));
+      }, [bs.weight, bs.bodyFatPct]);
+
+      const save = () => {
+        const w = parseFloat(weightStr);
+        const bf = parseFloat(bfStr);
+        if (isNaN(w) || w < 50 || w > 600) return;
+        const nextBs = {
+          ...bs,
+          weight: Math.round(w * 10) / 10,
+          bodyFatPct: !isNaN(bf) && bf > 3 && bf < 60 ? Math.round(bf * 10) / 10 : null,
+          lastUpdated: new Date().toISOString(),
+        };
+        const history = [
+          { date: todayKey(), weight: nextBs.weight, bodyFatPct: nextBs.bodyFatPct, source: 'manual' },
+          ...(state.bodyStatsHistory || []),
+        ].slice(0, 365);
+        onUpdateState({ ...state, bodyStats: nextBs, bodyStatsHistory: history });
+        setSaved(true);
+        setTimeout(() => setSaved(false), 1500);
+      };
+
+      const updateField = (key, val) => {
+        onUpdateState({ ...state, bodyStats: { ...bs, [key]: val } });
+      };
+
+      const targets = computeMacroTargets(bs);
+
+      return (
+        <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-5 mb-4">
+          <div className="text-xs uppercase tracking-[0.2em] text-neutral-500 font-mono mb-3">BODY STATS</div>
+          <div className="text-sm text-neutral-400 mb-4">
+            Update after weighing in. Macro targets recalculate automatically.
+          </div>
+
+          <div className="grid grid-cols-2 gap-3 mb-4">
+            <div>
+              <div className="text-[10px] uppercase tracking-wider text-neutral-500 font-mono mb-1">Weight (lb)</div>
+              <input type="number" inputMode="decimal" value={weightStr} onChange={(e) => setWeightStr(e.target.value)}
+                className="w-full bg-neutral-900 border border-neutral-800 focus:border-orange-500 rounded-lg px-3 py-3 text-neutral-50 font-mono text-xl font-bold text-center outline-none" />
+            </div>
+            <div>
+              <div className="text-[10px] uppercase tracking-wider text-neutral-500 font-mono mb-1">Body Fat %</div>
+              <input type="number" inputMode="decimal" value={bfStr} onChange={(e) => setBfStr(e.target.value)}
+                className="w-full bg-neutral-900 border border-neutral-800 focus:border-orange-500 rounded-lg px-3 py-3 text-neutral-50 font-mono text-xl font-bold text-center outline-none" />
+            </div>
+          </div>
+          <button onClick={save}
+            className="w-full py-3 rounded-lg bg-orange-500 text-black uppercase tracking-wider text-xs font-bold hover:bg-orange-400 mb-4">
+            {saved ? 'Saved' : 'Save weigh-in'}
+          </button>
+
+          <div className="grid grid-cols-2 gap-3 mb-4">
+            <div>
+              <div className="text-[10px] uppercase tracking-wider text-neutral-500 font-mono mb-1">Goal BF %</div>
+              <div className="flex items-center gap-1">
+                <button onClick={() => updateField('goalBodyFatPct', Math.max(5, (bs.goalBodyFatPct || 15) - 1))} className="w-9 h-9 rounded border border-neutral-800 flex items-center justify-center text-neutral-300 hover:bg-neutral-900"><Minus size={14} /></button>
+                <div className="flex-1 text-center font-mono text-lg font-bold text-neutral-50">{bs.goalBodyFatPct || 15}</div>
+                <button onClick={() => updateField('goalBodyFatPct', Math.min(40, (bs.goalBodyFatPct || 15) + 1))} className="w-9 h-9 rounded border border-neutral-800 flex items-center justify-center text-neutral-300 hover:bg-neutral-900"><Plus size={14} /></button>
+              </div>
+            </div>
+            <div>
+              <div className="text-[10px] uppercase tracking-wider text-neutral-500 font-mono mb-1">Activity</div>
+              <select value={bs.activityLevel || 'active'}
+                onChange={(e) => updateField('activityLevel', e.target.value)}
+                className="w-full h-9 bg-neutral-900 border border-neutral-800 rounded text-neutral-100 text-sm px-2 outline-none focus:border-orange-500">
+                {Object.entries(ACTIVITY_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+              </select>
+            </div>
+          </div>
+
+          <div className="bg-neutral-900 border border-neutral-800 rounded-lg p-3">
+            <div className="flex items-center justify-between mb-2">
+              <div className="text-[10px] uppercase tracking-widest text-neutral-500 font-mono">Computed targets</div>
+              <div className="text-[10px] uppercase tracking-wider text-orange-400 font-mono font-semibold">{targets.mode}</div>
+            </div>
+            <div className="grid grid-cols-4 gap-2 text-center">
+              <div>
+                <div className="font-mono text-lg font-bold text-neutral-50">{targets.kcal}</div>
+                <div className="text-[9px] uppercase tracking-wider text-neutral-500">cal</div>
+              </div>
+              <div>
+                <div className="font-mono text-lg font-bold text-neutral-50">{targets.protein}</div>
+                <div className="text-[9px] uppercase tracking-wider text-neutral-500">protein</div>
+              </div>
+              <div>
+                <div className="font-mono text-lg font-bold text-neutral-50">{targets.carbs}</div>
+                <div className="text-[9px] uppercase tracking-wider text-neutral-500">carbs</div>
+              </div>
+              <div>
+                <div className="font-mono text-lg font-bold text-neutral-50">{targets.fat}</div>
+                <div className="text-[9px] uppercase tracking-wider text-neutral-500">fat</div>
+              </div>
+            </div>
+            <div className="text-[10px] text-neutral-600 mt-2 font-mono">
+              Maint ~{targets.maintenance} cal · BMR {targets.bmr}
+            </div>
+          </div>
         </div>
       );
     };
@@ -894,6 +1509,8 @@
               </button>
             )}
           </div>
+
+          <BodyStatsCard state={state} onUpdateState={onUpdateState} />
 
           <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-5 mb-4">
             <div className="text-xs uppercase tracking-[0.2em] text-neutral-500 font-mono mb-3">CURRENT POSITION</div>
@@ -1030,9 +1647,10 @@
 
       return (
         <div className="min-h-screen bg-black text-neutral-100">
-          {view === 'home' && <HomeView state={state} syncStatus={syncStatus} onStart={handleStart} onHistory={() => setView('history')} onSettings={() => setView('settings')} />}
+          {view === 'home' && <HomeView state={state} syncStatus={syncStatus} onStart={handleStart} onHistory={() => setView('history')} onSettings={() => setView('settings')} onDiet={() => setView('diet')} />}
           {view === 'session' && activeDayId && <SessionView state={state} dayId={activeDayId} onComplete={handleComplete} onCancel={handleCancel} onUpdateState={setState} />}
           {view === 'history' && <HistoryView state={state} onBack={() => setView('home')} />}
+          {view === 'diet' && <DietView state={state} onBack={() => setView('home')} onUpdateState={setState} />}
           {view === 'settings' && <SettingsView state={state} syncStatus={syncStatus} onBack={() => setView('home')} onUpdateState={setState} onResync={handleResync} />}
         </div>
       );
