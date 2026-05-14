@@ -139,7 +139,6 @@
       'decline-fly-tonal':{ name: 'Decline Chest Fly (Tonal)', sets: 3, repsLow: 8,  repsHigh: 10, inc: 5,  startWeight: 40 },
       'goblet-squat':     { name: 'Goblet Squat',           sets: 3, repsLow: 8,  repsHigh: 10, inc: 5,  startWeight: 50 },
       'lat-pulldown':     { name: 'Lat Pulldown',           sets: 3, repsLow: 8,  repsHigh: 10, inc: 5,  startWeight: 120 },
-      'military-press':   { name: 'Military Press',         sets: 3, repsLow: 8,  repsHigh: 10, inc: 5,  startWeight: 95 },
       'plank':            { name: 'Plank',                  sets: 3, repsLow: 30, repsHigh: 60, inc: 0,  startWeight: 0, isTimed: true },
       'romanian-dl':      { name: 'Romanian Deadlift',      sets: 3, repsLow: 8,  repsHigh: 10, inc: 10, startWeight: 135 },
       'leg-press':        { name: 'Leg Press',              sets: 3, repsLow: 10, repsHigh: 12, inc: 10, startWeight: 200 },
@@ -155,7 +154,15 @@
 
     const DAY_TEMPLATES = {
       chest:    { id: 'chest',    name: 'Chest Day',     mainLift: 'bench',    mainName: 'Bench Press',          isVolume: false, accessories: ['incline-db', 'close-grip', 'tricep-ext-tonal', 'decline-fly-tonal'] },
-      fullbody: { id: 'fullbody', name: 'Full Body Day', mainLift: 'bench',    mainName: 'Bench Press (Volume)', isVolume: true,  accessories: ['goblet-squat', 'lat-pulldown', 'military-press', 'plank'] },
+      // Full Body day: military press is the AMRAP-tracked main (4th 5/3/1 lift).
+      // Bench BBB (5x10 at 60% bench TM) sits as a supplementary block - no
+      // AMRAP, no progression decisions, just volume groove work for bench.
+      fullbody: {
+        id: 'fullbody', name: 'Full Body Day',
+        mainLift: 'press', mainName: 'Military Press', isVolume: false,
+        supplementary: { lift: 'bench', name: 'Bench Press (BBB)', pct: 0.60, deloadPct: 0.50, sets: 5, deloadSets: 3, reps: 10, deloadReps: 5 },
+        accessories: ['goblet-squat', 'lat-pulldown', 'plank'],
+      },
       legs:     { id: 'legs',     name: 'Leg Day',       mainLift: 'squat',    mainName: 'Back Squat',           isVolume: false, accessories: ['romanian-dl', 'leg-press', 'leg-curls', 'calf-raises', 'leg-raises'] },
       back:     { id: 'back',     name: 'Back Day',      mainLift: 'deadlift', mainName: 'Deadlift',             isVolume: false, accessories: ['pull-ups', 'barbell-rows', 'lat-pulldown-back', 'face-pulls', 'bicep-curls'] },
     };
@@ -165,19 +172,8 @@
     // SESSION BUILDING
     // ============================================================
     const buildMainSets = (tm, week, isVolume) => {
-      if (isVolume) {
-        // Boring But Big (BBB) supplementary protocol: 5 sets x 10 reps at 60%
-        // TM. Standard 5/3/1 add-on for bench growth. On deload week, drop to
-        // 3 sets of 5 at 50% so total weekly tonnage backs off.
-        const isDeload = week === 4;
-        const pct = isDeload ? 0.50 : 0.60;
-        const count = isDeload ? 3 : 5;
-        const reps = isDeload ? 5 : 10;
-        const w = round5(tm * pct);
-        return Array.from({ length: count }, (_, i) => ({
-          id: `main-${i}`, weight: w, targetReps: reps, isAmrap: false, completed: false, actualReps: null
-        }));
-      }
+      // isVolume legacy path kept in case any day still flags volume (none do
+      // post-promotion of military press as Full Body main). Treat as 5/3/1.
       return WEEK_SCHEMES[week].sets.map((s, i) => ({
         id: `main-${i}`, weight: round5(tm * s.pct), targetReps: s.reps,
         isAmrap: s.isAmrap, minReps: s.minReps, completed: false, actualReps: null
@@ -199,6 +195,23 @@
       };
     };
 
+    const buildSupplementary = (sup, state) => {
+      if (!sup) return null;
+      const isDeload = state.week === 4;
+      const pct = isDeload ? (sup.deloadPct ?? sup.pct) : sup.pct;
+      const count = isDeload ? (sup.deloadSets ?? sup.sets) : sup.sets;
+      const reps = isDeload ? (sup.deloadReps ?? sup.reps) : sup.reps;
+      const supTm = state.trainingMaxes[sup.lift];
+      const w = round5(supTm * pct);
+      return {
+        lift: sup.lift,
+        name: sup.name,
+        sets: Array.from({ length: count }, (_, i) => ({
+          id: `sup-${i}`, weight: w, targetReps: reps, isAmrap: false, completed: false, actualReps: null,
+        })),
+      };
+    };
+
     const buildSession = (dayId, state) => {
       const tpl = DAY_TEMPLATES[dayId];
       const tm = state.trainingMaxes[tpl.mainLift];
@@ -207,6 +220,7 @@
         weekLabel: WEEK_SCHEMES[state.week].label,
         mainLift: tpl.mainLift, mainName: tpl.mainName, isVolume: tpl.isVolume,
         mainSets: buildMainSets(tm, state.week, tpl.isVolume),
+        supplementary: buildSupplementary(tpl.supplementary, state),
         accessories: tpl.accessories.map(id => buildAccessory(id, state.accessoryLog)),
       };
     };
@@ -242,7 +256,8 @@
         const amrap = (completed.mainSets || []).find((s) => s.isAmrap && s.actualReps != null);
         if (amrap && amrap.actualReps >= amrap.targetReps + 3) {
           const lift = completed.mainLift;
-          const bump = lift === 'bench' ? 5 : 10;
+          // Upper body lifts (bench, press) bump by 5; lower body (squat, dl) by 10.
+          const bump = (lift === 'bench' || lift === 'press') ? 5 : 10;
           const fromTM = trainingMaxes[lift];
           trainingMaxes = { ...trainingMaxes, [lift]: fromTM + bump };
           smartBumped = { lift, fromTM, toTM: fromTM + bump, repsOverTarget: amrap.actualReps - amrap.targetReps };
@@ -253,7 +268,7 @@
         newDone = { chest: false, fullbody: false, legs: false, back: false };
         if (week === 4) {
           week = 1; cycle += 1; cycleAdvanced = true;
-          trainingMaxes = { bench: trainingMaxes.bench + 5, squat: trainingMaxes.squat + 10, deadlift: trainingMaxes.deadlift + 10 };
+          trainingMaxes = { bench: trainingMaxes.bench + 5, squat: trainingMaxes.squat + 10, deadlift: trainingMaxes.deadlift + 10, press: (trainingMaxes.press || 85) + 5 };
         } else week += 1;
       }
       const newHistory = [{ ...completed, completedAt: new Date().toISOString(), smartBumped }, ...(state.history || [])].slice(0, 200);
@@ -408,6 +423,7 @@
       bench:    [155, 200, 245, 295, 355],
       squat:    [195, 250, 305, 365, 430],
       deadlift: [240, 300, 365, 435, 510],
+      press:    [ 75, 105, 140, 175, 215],
     };
     const STRENGTH_PCT = [5, 25, 50, 75, 95];
     const STRENGTH_BANDS = ['Beginner', 'Novice', 'Intermediate', 'Advanced', 'Elite'];
@@ -474,7 +490,7 @@
     // Uses e1RM when available, else TM as a 1RM proxy.
     const overallStrengthPercentile = (state) => {
       const bs = state.bodyStats || {};
-      const lifts = ['bench', 'squat', 'deadlift'];
+      const lifts = ['bench', 'squat', 'deadlift', 'press'];
       const pcts = lifts.map((lift) => {
         const e1RM = getBestE1RM(state.history, lift) || (state.trainingMaxes || {})[lift];
         if (!e1RM) return null;
@@ -534,8 +550,9 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
       lastUpdated: null,
     };
     const defaultState = {
-      // Calibrated 2026-05: bench 1RM 225, squat 155x5 (~181 e1RM), DL 165x10 hex (~220 e1RM).
-      trainingMaxes: { bench: 200, squat: 165, deadlift: 200 },
+      // Calibrated 2026-05: bench 1RM 225, squat 155x5 (~181 e1RM), DL 165x10 hex (~220 e1RM),
+      // press 95x8 (~120 e1RM -> TM 105 at 90% of 1RM).
+      trainingMaxes: { bench: 200, squat: 165, deadlift: 200, press: 105 },
       cycle: 1, week: 1,
       completedThisWeek: { chest: false, fullbody: false, legs: false, back: false },
       accessoryLog: {}, history: [], activeSession: null,
@@ -779,6 +796,14 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
           const tm = parsed.trainingMaxes;
           if (tm && tm.bench === 230 && tm.squat === 250 && tm.deadlift === 295) {
             parsed.trainingMaxes = { bench: 200, squat: 165, deadlift: 200 };
+          }
+          // Backfill press TM for users on the schema before press became a 4th main lift.
+          // Also one-time bump: if press is exactly 85 (the initial conservative default
+          // shipped briefly), upgrade to 105 to match the user's actual 95x8 starting set.
+          if (parsed.trainingMaxes && parsed.trainingMaxes.press == null) {
+            parsed.trainingMaxes = { ...parsed.trainingMaxes, press: 105 };
+          } else if (parsed.trainingMaxes && parsed.trainingMaxes.press === 85) {
+            parsed.trainingMaxes = { ...parsed.trainingMaxes, press: 105 };
           }
           const tms = parsed.trainingMaxes || defaultState.trainingMaxes;
           const tmHistory = (parsed.trainingMaxesHistory && parsed.trainingMaxesHistory.length > 0)
@@ -1378,13 +1403,16 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
       const benchPts = sparkPoints(history, 'bench');
       const squatPts = sparkPoints(history, 'squat');
       const dlPts = sparkPoints(history, 'deadlift');
+      const pressPts = sparkPoints(history, 'press');
       const benchE = getBestE1RM(state.history, 'bench');
       const squatE = getBestE1RM(state.history, 'squat');
       const dlE = getBestE1RM(state.history, 'deadlift');
+      const pressE = getBestE1RM(state.history, 'press');
       const lifts = [
-        { id: 'bench',    label: 'Bench',    pts: benchPts, val: tm.bench,    e1RM: benchE, standards: adjustedStandards('bench', bs.weight, bs.age),    color: '#F97316' },
-        { id: 'squat',    label: 'Squat',    pts: squatPts, val: tm.squat,    e1RM: squatE, standards: adjustedStandards('squat', bs.weight, bs.age),    color: '#84cc16' },
-        { id: 'deadlift', label: 'Deadlift', pts: dlPts,    val: tm.deadlift, e1RM: dlE,    standards: adjustedStandards('deadlift', bs.weight, bs.age), color: '#a78bfa' },
+        { id: 'bench',    label: 'Bench',    pts: benchPts, val: tm.bench,         e1RM: benchE, standards: adjustedStandards('bench', bs.weight, bs.age),    color: '#F97316' },
+        { id: 'press',    label: 'Press',    pts: pressPts, val: tm.press || 85,   e1RM: pressE, standards: adjustedStandards('press', bs.weight, bs.age),    color: '#fbbf24' },
+        { id: 'squat',    label: 'Squat',    pts: squatPts, val: tm.squat,         e1RM: squatE, standards: adjustedStandards('squat', bs.weight, bs.age),    color: '#84cc16' },
+        { id: 'deadlift', label: 'Deadlift', pts: dlPts,    val: tm.deadlift,      e1RM: dlE,    standards: adjustedStandards('deadlift', bs.weight, bs.age), color: '#a78bfa' },
       ];
       const overall = overallStrengthPercentile(state);
       const overallColor = overall == null ? 'text-neutral-500'
@@ -1409,7 +1437,7 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
       );
       return (
         <ExpandableCard summary={summary}>
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-2 gap-3">
             {lifts.map(l => {
               const delta = l.pts.length >= 2 ? formatDelta(l.pts[l.pts.length - 1].value, valueDaysAgo(l.pts, 90), '', 0) : '—';
               const strengthValue = l.e1RM || l.val;
@@ -1896,13 +1924,17 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
       const toggleMain = (id) => setSession(p => ({ ...p, mainSets: p.mainSets.map(s => s.id === id ? { ...s, completed: !s.completed } : s) }));
       const logAmrap = (id, reps) => setSession(p => ({ ...p, mainSets: p.mainSets.map(s => s.id === id ? { ...s, completed: true, actualReps: reps } : s) }));
       const updateAcc = (acc) => setSession(p => ({ ...p, accessories: p.accessories.map(a => a.id === acc.id ? acc : a) }));
+      const toggleSup = (id) => setSession(p => p.supplementary ? ({ ...p, supplementary: { ...p.supplementary, sets: p.supplementary.sets.map(s => s.id === id ? { ...s, completed: !s.completed } : s) } }) : p);
 
+      const supSets = session.supplementary ? session.supplementary.sets : [];
       const mainTotal = session.mainSets.length;
       const mainDone = session.mainSets.filter(s => s.completed).length;
+      const supTotal = supSets.length;
+      const supDone = supSets.filter(s => s.completed).length;
       const accTotal = session.accessories.reduce((s, a) => s + a.setData.length, 0);
       const accDone = session.accessories.reduce((s, a) => s + a.setData.filter(x => x.completed).length, 0);
-      const totalDone = mainDone + accDone;
-      const totalSets = mainTotal + accTotal;
+      const totalDone = mainDone + supDone + accDone;
+      const totalSets = mainTotal + supTotal + accTotal;
       const progress = totalSets ? (totalDone / totalSets) * 100 : 0;
       const mainComplete = mainDone === mainTotal;
 
@@ -1945,6 +1977,23 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
               ))}
             </div>
           </div>
+
+          {session.supplementary && (
+            <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-4 md:p-5 mb-4">
+              <div className="mb-4">
+                <div className="text-[10px] uppercase tracking-widest text-orange-400 font-semibold mb-1">SUPPLEMENTARY</div>
+                <div className="text-xl font-bold text-neutral-50 tracking-tight">{session.supplementary.name}</div>
+                <div className="text-xs text-neutral-500 mt-1">Boring But Big volume work — submaximal weight, no AMRAP.</div>
+              </div>
+              <div className="space-y-2">
+                {session.supplementary.sets.map((set, i) => (
+                  <MainSetRow key={set.id} set={set} idx={i}
+                    onToggle={() => toggleSup(set.id)}
+                    onAmrap={() => {}} />
+                ))}
+              </div>
+            </div>
+          )}
 
           <div className="text-[10px] uppercase tracking-widest text-neutral-500 font-mono mb-3">ACCESSORIES</div>
           <div className="space-y-3">
@@ -3210,7 +3259,7 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
           <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-5 mb-4">
             <div className="text-xs uppercase tracking-[0.2em] text-neutral-500 font-mono mb-3">TRAINING MAXES</div>
             <div className="text-sm text-neutral-400 mb-4">Roughly 90% of your true 1-rep max for each lift.</div>
-            {[{ id: 'bench', label: 'Bench Press' }, { id: 'squat', label: 'Back Squat' }, { id: 'deadlift', label: 'Deadlift' }].map(l => (
+            {[{ id: 'bench', label: 'Bench Press' }, { id: 'press', label: 'Military Press' }, { id: 'squat', label: 'Back Squat' }, { id: 'deadlift', label: 'Deadlift' }].map(l => (
               <div key={l.id} className="mb-3 last:mb-0">
                 <div className="text-xs text-neutral-400 mb-2">{l.label}</div>
                 <div className="flex items-center gap-2">
@@ -3465,6 +3514,20 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
         setActiveDayId(null);
         setCompletionSummary(summary);
         setView('complete');
+
+        // Trigger an Oura sync in the background so the recovery card on the
+        // summary screen (and Home next visit) shows today's freshest data,
+        // including readiness if Oura has computed it since the last sync.
+        const secret = cloudSync.getSecret();
+        if (secret) {
+          fetch('/api/oura/sync', { headers: { 'x-sync-secret': secret } })
+            .then(r => r.ok ? r.json() : null)
+            .then(j => {
+              if (!j || !j.last_sync_at) return;
+              setState(prev => prev ? { ...prev, oura: j } : prev);
+            })
+            .catch(() => {});
+        }
       };
       const handleCancel = () => setView('log');
       const handleSummaryDone = () => { setCompletionSummary(null); setView('log'); };

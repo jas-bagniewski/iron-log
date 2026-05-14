@@ -64,7 +64,6 @@ export const ACCESSORIES: Record<string, AccessoryDef> = {
   // FULL BODY DAY
   "goblet-squat":     { name: "Goblet Squat",           sets: 3, repsLow: 8,  repsHigh: 10, inc: 5,  startWeight: 50 },
   "lat-pulldown":     { name: "Lat Pulldown",           sets: 3, repsLow: 8,  repsHigh: 10, inc: 5,  startWeight: 120 },
-  "military-press":   { name: "Military Press",         sets: 3, repsLow: 8,  repsHigh: 10, inc: 5,  startWeight: 95 },
   "plank":            { name: "Plank",                  sets: 3, repsLow: 30, repsHigh: 60, inc: 0,  startWeight: 0, isTimed: true },
   // LEG DAY
   "romanian-dl":      { name: "Romanian Deadlift",      sets: 3, repsLow: 8,  repsHigh: 10, inc: 10, startWeight: 135 },
@@ -92,7 +91,7 @@ export type DayTemplate = {
 
 export const DAY_TEMPLATES: Record<string, DayTemplate> = {
   chest:    { id: "chest",    name: "Chest Day",     mainLift: "bench",    mainName: "Bench Press",          isVolume: false, accessories: ["incline-db", "close-grip", "tricep-ext-tonal", "decline-fly-tonal"] },
-  fullbody: { id: "fullbody", name: "Full Body Day", mainLift: "bench",    mainName: "Bench Press (Volume)", isVolume: true,  accessories: ["goblet-squat", "lat-pulldown", "military-press", "plank"] },
+  fullbody: { id: "fullbody", name: "Full Body Day", mainLift: "press",    mainName: "Military Press",       isVolume: false, supplementary: { lift: "bench", name: "Bench Press (BBB)", pct: 0.60, deloadPct: 0.50, sets: 5, deloadSets: 3, reps: 10, deloadReps: 5 }, accessories: ["goblet-squat", "lat-pulldown", "plank"] },
   legs:     { id: "legs",     name: "Leg Day",       mainLift: "squat",    mainName: "Back Squat",           isVolume: false, accessories: ["romanian-dl", "leg-press", "leg-curls", "calf-raises", "leg-raises"] },
   back:     { id: "back",     name: "Back Day",      mainLift: "deadlift", mainName: "Deadlift",             isVolume: false, accessories: ["pull-ups", "barbell-rows", "lat-pulldown-back", "face-pulls", "bicep-curls"] },
 };
@@ -150,7 +149,7 @@ export type Session = {
 export type AccessoryLog = Record<string, { weight: number; hitTopOnAllSets: boolean; lastReps?: number[] }>;
 
 export type AppState = {
-  trainingMaxes: { bench: number; squat: number; deadlift: number };
+  trainingMaxes: { bench: number; squat: number; deadlift: number; press: number };
   cycle: number;
   week: number;
   completedThisWeek: Record<string, boolean>;
@@ -161,8 +160,9 @@ export type AppState = {
 };
 
 export const defaultState: AppState = {
-  // Calibrated 2026-05: bench 1RM 225, squat 155x5 (~181 e1RM), DL 165x10 hex (~220 e1RM).
-  trainingMaxes: { bench: 200, squat: 165, deadlift: 200 },
+  // Calibrated 2026-05: bench 1RM 225, squat 155x5 (~181 e1RM), DL 165x10 hex (~220 e1RM),
+  // press 95x8 (~120 e1RM -> TM 105 at 90% of 1RM).
+  trainingMaxes: { bench: 200, squat: 165, deadlift: 200, press: 105 },
   cycle: 1,
   week: 1,
   completedThisWeek: { chest: false, fullbody: false, legs: false, back: false },
