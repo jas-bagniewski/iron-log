@@ -591,7 +591,7 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
     // shifted by ±300/±200 cal based on current vs goal BF.
     // If Oura's 7-day total_burn average is available and recent, it replaces the
     // BMR × activity-multiplier TDEE entirely (more accurate than a hardcoded factor).
-    const computeMacroTargets = (bs, oura = null, pace = null) => {
+    const computeMacroTargets = (bs, oura = null, pace = null, diag = null) => {
       const stats = { ...defaultBodyStats, ...bs };
       const weightKg = stats.weight * 0.4536;
       const heightCm = stats.height * 2.54;
@@ -611,6 +611,31 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
       if (bfDelta > 1) { baseKcal = tdee - 300; proteinPerLb = 1.15; mode = 'cut'; }
       else if (bfDelta < -1) { baseKcal = tdee + 200; proteinPerLb = 1.0; mode = 'bulk'; }
       else { baseKcal = tdee; proteinPerLb = 1.05; mode = 'maintain'; }
+
+      // Diagnostic-based auto-adjustment: when the body-comp trend flags a
+      // persistent issue, dampened correction is applied to calories and/or
+      // protein. Confidence gate: trend must have >=5 data points and span
+      // >=14 days. Magnitude is HALF of the verbal recommendation - lets the
+      // system step toward the right answer over multiple weeks rather than
+      // lurching from one extreme to the other.
+      let diagAdjustment = null;
+      const trendConfident = diag && diag._trend && diag._trend.hasEnoughData
+        && diag._trend.windowDays >= 14 && diag._trend.dataPoints >= 5;
+      if (diag && diag.status === 'warn' && trendConfident) {
+        const v = diag.verdict || '';
+        if (v.includes('Losing muscle')) {
+          baseKcal += 75;                              // half of the +150 textbook recommendation
+          proteinPerLb = Math.max(proteinPerLb, 1.2);  // full protein bump (cheap, safe)
+          diagAdjustment = { source: 'muscle', kcal: 75, proteinPerLb: 1.2, label: 'Lean preservation' };
+        } else if (v.startsWith('No movement')) {
+          baseKcal -= 100;                             // half of -200
+          diagAdjustment = { source: 'stall', kcal: -100, proteinPerLb: null, label: 'Stall break' };
+        } else if (v.includes('Surplus too aggressive')) {
+          baseKcal -= 100;                             // half of -200
+          diagAdjustment = { source: 'over-bulk', kcal: -100, proteinPerLb: null, label: 'Trim surplus' };
+        }
+      }
+
       const protein = Math.round(stats.weight * proteinPerLb);
       const fat = Math.round(stats.weight * 0.4);
 
@@ -628,7 +653,7 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
       const carbCal = Math.max(0, kcal - protein * 4 - fat * 9);
       const carbs = Math.round(carbCal / 4);
       return {
-        kcal, baseKcal: Math.round(baseKcal), adjustment,
+        kcal, baseKcal: Math.round(baseKcal), adjustment, diagAdjustment,
         protein, fat, carbs,
         maintenance: Math.round(tdee), bmr: Math.round(bmr), mode,
         tdeeSource: ouraTdee != null ? 'oura' : 'estimate',
@@ -1224,43 +1249,57 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
     // ============================================================
     // BODY COMP TREND + DIAGNOSTIC
     // ============================================================
-    // Returns rate-of-change over a window, plus a verdict + recommended
-    // action based on whether you're losing fat / muscle / weight / nothing.
-    const computeBodyTrend = (state, windowDays = 30) => {
+    // Linear regression on weigh-ins in the past 28 days. Slope = rate of
+    // change per week. Robust to single-day measurement noise (smart scale
+    // body-fat readings have +-0.5% variance; one bad reading shouldn't flip
+    // the diagnostic). Confidence requires 5+ data points spanning 14+ days
+    // for the auto-adjustment to fire.
+    const computeBodyTrend = (state, windowDays = 28) => {
       const hist = state.bodyStatsHistory || [];
-      if (hist.length < 2) return { hasEnoughData: false, points: hist.length };
+      if (hist.length < 2) return { hasEnoughData: false, dataPoints: hist.length };
 
-      // History is newest-first. Find a comparison point at least windowDays old,
-      // falling back to the oldest entry we have.
       const newest = hist[0];
       const newestTs = new Date(newest.date).getTime();
-      let baseline = hist[hist.length - 1];
-      const cutoff = newestTs - windowDays * 86_400_000;
-      for (const h of hist) {
-        const t = new Date(h.date).getTime();
-        if (t <= cutoff) { baseline = h; break; }
-      }
-      const baselineTs = new Date(baseline.date).getTime();
-      const daysSpan = Math.max(1, (newestTs - baselineTs) / 86_400_000);
-      const weeksSpan = daysSpan / 7;
+      const cutoffTs = newestTs - windowDays * 86_400_000;
+      // Take all weigh-ins within the window. If fewer than 4, expand to the
+      // most-recent 4 (so we have enough points to fit a line even with
+      // sparse data).
+      let pts = hist.filter(h => new Date(h.date).getTime() >= cutoffTs);
+      if (pts.length < 4) pts = hist.slice(0, Math.min(hist.length, 8));
+      if (pts.length < 2) return { hasEnoughData: false, dataPoints: pts.length };
 
-      const leanLb = (w, bf) => (w != null && bf != null) ? w * (1 - bf / 100) : null;
+      const oldestTs = new Date(pts[pts.length - 1].date).getTime();
+      const daysSpan = Math.max(1, (newestTs - oldestTs) / 86_400_000);
 
-      const wNew = newest.weight, wOld = baseline.weight;
-      const bfNew = newest.bodyFatPct, bfOld = baseline.bodyFatPct;
-      const lNew = leanLb(wNew, bfNew), lOld = leanLb(wOld, bfOld);
+      // Least-squares slope of value vs timestamp (ms). Scale to per-week.
+      const fit = (extract) => {
+        const xy = pts.map(h => ({ x: new Date(h.date).getTime(), y: extract(h) }))
+                      .filter(p => p.y != null && !isNaN(p.y));
+        if (xy.length < 2) return null;
+        const n = xy.length;
+        const mx = xy.reduce((s, p) => s + p.x, 0) / n;
+        const my = xy.reduce((s, p) => s + p.y, 0) / n;
+        let num = 0, den = 0;
+        for (const p of xy) {
+          num += (p.x - mx) * (p.y - my);
+          den += (p.x - mx) * (p.x - mx);
+        }
+        if (den === 0) return null;
+        return (num / den) * (7 * 86_400_000); // slope per week
+      };
 
-      const weightRate = (wNew - wOld) / weeksSpan;
-      const bfRate = (bfNew != null && bfOld != null) ? (bfNew - bfOld) / weeksSpan : null;
-      const leanRate = (lNew != null && lOld != null) ? (lNew - lOld) / weeksSpan : null;
+      const leanOf = (h) => (h.weight != null && h.bodyFatPct != null) ? h.weight * (1 - h.bodyFatPct / 100) : null;
 
       return {
         hasEnoughData: true,
         windowDays: Math.round(daysSpan),
-        weeksSpan,
-        weightNow: wNew, weightThen: wOld, weightRate,
-        bfNow: bfNew, bfThen: bfOld, bfRate,
-        leanNow: lNew, leanThen: lOld, leanRate,
+        dataPoints: pts.length,
+        weightNow: newest.weight,
+        bfNow: newest.bodyFatPct,
+        leanNow: leanOf(newest),
+        weightRate: fit(h => h.weight),
+        bfRate: fit(h => h.bodyFatPct),
+        leanRate: fit(leanOf),
       };
     };
 
@@ -1268,8 +1307,12 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
     // verdict + actionable next step. Tolerances are tight on purpose - the
     // measurement noise on a smart scale is real but consistent week-over-week.
     const bodyDiagnostic = (trend, bodyStats) => {
+      // Helper: attach the trend onto the returned object so callers
+      // (computeMacroTargets in particular) can confidence-gate the auto
+      // adjustment on having enough data.
+      const wrap = (out) => ({ ...out, _trend: trend });
       if (!trend || !trend.hasEnoughData) {
-        return { status: 'unknown', verdict: 'Need more weigh-ins to read the trend.', action: 'Sync Withings or log weigh-ins weekly. 2+ data points unlock this section.' };
+        return wrap({ status: 'unknown', verdict: 'Need more weigh-ins to read the trend.', action: 'Sync Withings or log weigh-ins weekly. 2+ data points unlock this section.' });
       }
       const wTol = 0.15;  // lb/week
       const bfTol = 0.1;  // %/week
@@ -1281,27 +1324,34 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
       const inCutMode = (bodyStats?.bodyFatPct || 18) - (bodyStats?.goalBodyFatPct || 15) > 1;
 
       if (wDir === 'loss' && bfDir === 'loss' && (lDir === 'stable' || lDir === 'gain')) {
-        return { status: 'good', verdict: 'Healthy fat loss — maintaining muscle.', action: 'Stay the course. Hit protein 215g+ daily.' };
+        return wrap({ status: 'good', verdict: 'Healthy fat loss — maintaining muscle.', action: 'Stay the course. Hit protein 215g+ daily.' });
       }
       if (wDir === 'loss' && lDir === 'loss') {
-        return { status: 'warn', verdict: 'Losing muscle alongside fat.', action: 'Reduce deficit by 100-200 cal/day. Bump protein to 1.2 g/lb (~220g).' };
+        return wrap({ status: 'warn', verdict: 'Losing muscle alongside fat.', action: 'Reduce deficit by 100-200 cal/day. Bump protein to 1.2 g/lb (~220g).' });
       }
       if (wDir === 'stable' && bfDir === 'loss') {
-        return { status: 'good', verdict: 'Recomposition — fat down, weight steady.', action: 'Gold-standard outcome for your stage. Keep going.' };
+        return wrap({ status: 'good', verdict: 'Recomposition — fat down, weight steady.', action: 'Gold-standard outcome for your stage. Keep going.' });
       }
       if (wDir === 'stable' && bfDir === 'stable') {
-        return { status: 'warn', verdict: inCutMode ? 'No movement in ' + trend.windowDays + ' days.' : 'Steady — at maintenance.', action: inCutMode ? 'Deficit too small. Tighten by 150-250 cal/day or add a cardio session.' : 'If aiming for cut, drop intake or add training volume.' };
+        return wrap({ status: 'warn', verdict: inCutMode ? 'No movement in ' + trend.windowDays + ' days.' : 'Steady — at maintenance.', action: inCutMode ? 'Deficit too small. Tighten by 150-250 cal/day or add a cardio session.' : 'If aiming for cut, drop intake or add training volume.' });
       }
       if (wDir === 'gain' && bfDir === 'loss') {
-        return { status: 'good', verdict: 'Lean mass gain — gold for someone your stage.', action: 'Surplus is dialed in. Keep protein high.' };
+        return wrap({ status: 'good', verdict: 'Lean mass gain — gold for someone your stage.', action: 'Surplus is dialed in. Keep protein high.' });
       }
       if (wDir === 'gain' && bfDir === 'gain' && trend.bfRate > 0.2) {
-        return { status: 'warn', verdict: 'Surplus too aggressive — gaining fat.', action: 'Cut intake 200 cal/day. Protein stays the same.' };
+        return wrap({ status: 'warn', verdict: 'Surplus too aggressive — gaining fat.', action: 'Cut intake 200 cal/day. Protein stays the same.' });
       }
       if (wDir === 'gain' && bfDir === 'gain') {
-        return { status: 'good', verdict: 'Lean bulk on track — small fat gain expected.', action: 'Normal at this rate. Keep going.' };
+        return wrap({ status: 'good', verdict: 'Lean bulk on track — small fat gain expected.', action: 'Normal at this rate. Keep going.' });
       }
-      return { status: 'unknown', verdict: 'Mixed signals.', action: 'Log a few more weeks to clarify the pattern.' };
+      return wrap({ status: 'unknown', verdict: 'Mixed signals.', action: 'Log a few more weeks to clarify the pattern.' });
+    };
+
+    // Bundle: from state, compute the diagnostic in one call. Used by macro-
+    // target callers to feed both trend + diag into computeMacroTargets.
+    const computeBodyDiag = (state) => {
+      const trend = computeBodyTrend(state, 30);
+      return bodyDiagnostic(trend, state.bodyStats);
     };
 
     // Linear projection of how long until you hit goal BF% at current rate.
@@ -1386,7 +1436,10 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
               <div className="mt-4 space-y-3">
                 {trend.hasEnoughData ? (
                   <div className="bg-neutral-900 border border-neutral-800 rounded-lg p-3">
-                    <div className="text-[10px] uppercase tracking-[0.2em] text-neutral-500 font-mono mb-2">{trend.windowDays}-DAY TREND</div>
+                    <div className="flex items-baseline justify-between mb-2">
+                      <div className="text-[10px] uppercase tracking-[0.2em] text-neutral-500 font-mono">{trend.windowDays}-DAY TREND</div>
+                      <div className="text-[9px] uppercase tracking-wider text-neutral-600 font-mono">{trend.dataPoints} weigh-ins · linear fit</div>
+                    </div>
                     <div className="grid grid-cols-3 gap-2 text-center">
                       <div>
                         <div className="font-mono text-sm font-bold text-neutral-100">{fmtRate(trend.weightRate, 'lb')}</div>
@@ -1401,10 +1454,15 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
                         <div className="text-[9px] uppercase tracking-wider text-neutral-500 mt-0.5">lean mass</div>
                       </div>
                     </div>
+                    {(trend.dataPoints < 5 || trend.windowDays < 14) && (
+                      <div className="text-[10px] text-orange-300 font-mono mt-2 leading-snug">
+                        Low confidence: need 5+ weigh-ins over 14+ days before auto-adjustment kicks in. Weighing daily at the same time (morning, post-bathroom, pre-coffee) smooths out the day-to-day noise fast.
+                      </div>
+                    )}
                   </div>
                 ) : (
                   <div className="bg-neutral-900 border border-neutral-800 rounded-lg p-3 text-[11px] text-neutral-400 leading-snug">
-                    Log {2 - (state.bodyStatsHistory?.length || 0)} more weigh-in{(2 - (state.bodyStatsHistory?.length || 0)) === 1 ? '' : 's'} to unlock trend analysis. Weekly Withings sync is enough.
+                    Log {2 - (state.bodyStatsHistory?.length || 0)} more weigh-in{(2 - (state.bodyStatsHistory?.length || 0)) === 1 ? '' : 's'} to unlock trend analysis. For best accuracy, weigh in <strong>daily for the first week</strong> at the same time of day — the system averages them out so single-day noise doesn't move your numbers.
                   </div>
                 )}
 
@@ -1694,7 +1752,7 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
     // ============================================================
     const CalorieBalanceCard = ({ state, onOpenDiet }) => {
       const bal = computeCalorieBalance(state);
-      const targets = computeMacroTargets(state.bodyStats, state.oura, null);
+      const targets = computeMacroTargets(state.bodyStats, state.oura, null, computeBodyDiag(state));
       const dailyGoal = targets.baseKcal - targets.maintenance; // negative cutting, 0 maintain, positive bulk
       const weeklyGoal = dailyGoal * 7;
       const fmt = (n) => n == null ? '—' : `${n > 0 ? '+' : ''}${Math.round(n)}`;
@@ -1794,7 +1852,7 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
           {/* Course correction: surface what the auto-adjustment is and why */}
           {bal.cumulative.days >= 3 ? (() => {
             const pace = computeWeeklyPace(state);
-            const targetsWithPace = computeMacroTargets(state.bodyStats, state.oura, pace);
+            const targetsWithPace = computeMacroTargets(state.bodyStats, state.oura, pace, computeBodyDiag(state));
             const adj = targetsWithPace.adjustment;
             const distance = bal.cumulative.net - weeklyGoal;
             // adj > 0 = eat more today (you were too aggressive). adj < 0 = eat less (not deficit enough).
@@ -1837,7 +1895,7 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
     // TODAY'S DIET TILE (extracted; shown at top of Home)
     // ============================================================
     const TodayDietTile = ({ state, onOpenDiet }) => {
-      const t = computeMacroTargets(state.bodyStats, state.oura, computeWeeklyPace(state));
+      const t = computeMacroTargets(state.bodyStats, state.oura, computeWeeklyPace(state), computeBodyDiag(state));
       const meals = state.mealsByDate?.[todayKey()] || [];
       const sums = sumMeals(meals);
       const remaining = Math.max(0, t.kcal - sums.kcal);
@@ -1853,6 +1911,11 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
               <div className="font-mono text-3xl font-bold text-neutral-50">{over ? `+${sums.kcal - t.kcal}` : remaining}</div>
               <div className="text-[11px] text-neutral-500 font-mono">
                 {over ? 'cal over' : 'cal left'} · {meals.length} meal{meals.length === 1 ? '' : 's'}
+                {t.diagAdjustment && (
+                  <span className={t.diagAdjustment.kcal < 0 ? 'text-orange-300 ml-1' : 'text-blue-300 ml-1'}>
+                    ({t.diagAdjustment.kcal > 0 ? '+' : ''}{t.diagAdjustment.kcal} {t.diagAdjustment.source})
+                  </span>
+                )}
                 {t.adjustment !== 0 && (
                   <span className={t.adjustment < 0 ? 'text-orange-300 ml-1' : 'text-blue-300 ml-1'}>
                     ({t.adjustment > 0 ? '+' : ''}{t.adjustment} pace)
@@ -2413,7 +2476,7 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
       const meals = (state.mealsByDate && state.mealsByDate[today]) || [];
       const totals = sumMeals(meals);
       const pace = computeWeeklyPace(state);
-      const targets = computeMacroTargets(state.bodyStats, state.oura, pace);
+      const targets = computeMacroTargets(state.bodyStats, state.oura, pace, computeBodyDiag(state));
       const remaining = {
         kcal:    Math.max(0, targets.kcal - totals.kcal),
         protein: Math.max(0, targets.protein - totals.protein),
@@ -2789,7 +2852,7 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
       const today = todayKey();
       const meals = (state.mealsByDate && state.mealsByDate[today]) || [];
       const pace = computeWeeklyPace(state);
-      const targets = computeMacroTargets(state.bodyStats, state.oura, pace);
+      const targets = computeMacroTargets(state.bodyStats, state.oura, pace, computeBodyDiag(state));
       const totals = sumMeals(meals);
       const remaining = Math.max(0, targets.kcal - totals.kcal);
 
@@ -2835,6 +2898,11 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
               <div className="text-[10px] uppercase tracking-widest text-neutral-500 font-mono">CALORIES REMAINING</div>
               <div className="text-[10px] uppercase tracking-wider text-neutral-600 font-mono">
                 target {targets.kcal}
+                {targets.diagAdjustment && (
+                  <span className={`ml-1 ${targets.diagAdjustment.kcal < 0 ? 'text-orange-300' : 'text-blue-300'}`}>
+                    ({targets.diagAdjustment.kcal > 0 ? '+' : ''}{targets.diagAdjustment.kcal} {targets.diagAdjustment.source})
+                  </span>
+                )}
                 {targets.adjustment !== 0 && (
                   <span className={`ml-1 ${targets.adjustment < 0 ? 'text-orange-300' : 'text-blue-300'}`}>
                     ({targets.adjustment > 0 ? '+' : ''}{targets.adjustment} pace)
@@ -2854,8 +2922,17 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
               <MacroBar label="Carbs"   current={totals.carbs}   target={targets.carbs} />
               <MacroBar label="Fat"     current={totals.fat}     target={targets.fat} />
             </div>
-            {targets.adjustment !== 0 && (
+            {targets.diagAdjustment && (
               <div className="text-[11px] text-neutral-500 mt-3 leading-snug">
+                <span className={targets.diagAdjustment.kcal < 0 ? 'text-orange-300' : 'text-blue-300'}>
+                  Body-comp adjustment: {targets.diagAdjustment.kcal > 0 ? '+' : ''}{targets.diagAdjustment.kcal} cal
+                  {targets.diagAdjustment.proteinPerLb ? `, protein bumped to ${targets.diagAdjustment.proteinPerLb} g/lb` : ''}.
+                </span>
+                {' '}Half-step correction from the 28-day trend — auto-removes when the trend reverses.
+              </div>
+            )}
+            {targets.adjustment !== 0 && (
+              <div className="text-[11px] text-neutral-500 mt-2 leading-snug">
                 <span className={targets.adjustment < 0 ? 'text-orange-300' : 'text-blue-300'}>
                   Pace adjustment {targets.adjustment > 0 ? '+' : ''}{targets.adjustment} cal
                 </span>
@@ -3387,7 +3464,7 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
         }
       };
 
-      const targets = computeMacroTargets(bs, state.oura);
+      const targets = computeMacroTargets(bs, state.oura, computeWeeklyPace(state), computeBodyDiag(state));
 
       return (
         <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-5 mb-4">
