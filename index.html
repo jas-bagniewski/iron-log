@@ -1520,13 +1520,46 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
               </div>
             </div>
           </div>
-          {bal.cumulative.days >= 3 && (
-            <div className="flex items-center gap-2 mb-2">
-              <div className={`w-1.5 h-1.5 rounded-full ${goalZone.dot}`} />
-              <div className={`text-[10px] uppercase tracking-widest font-mono font-semibold ${goalZone.color}`}>{goalZone.label}</div>
-              <div className="text-[10px] text-neutral-600 font-mono">· vs goal {fmt(weeklyGoal)} cal/wk</div>
+
+          {/* Course correction: surface what the auto-adjustment is and why */}
+          {bal.cumulative.days >= 3 ? (() => {
+            const pace = computeWeeklyPace(state);
+            const targetsWithPace = computeMacroTargets(state.bodyStats, state.oura, pace);
+            const adj = targetsWithPace.adjustment;
+            const distance = bal.cumulative.net - weeklyGoal;
+            // adj > 0 = eat more today (you were too aggressive). adj < 0 = eat less (not deficit enough).
+            const onPace = Math.abs(adj) < 50;
+            return (
+              <div className="bg-neutral-900 border border-neutral-800 rounded-lg p-3 mb-3">
+                <div className="text-[10px] uppercase tracking-[0.2em] text-neutral-500 font-mono mb-1.5">COURSE CORRECTION</div>
+                {onPace ? (
+                  <div className="text-sm text-green-400 mb-1">On pace — keep going.</div>
+                ) : adj > 0 ? (
+                  <div className="text-sm text-orange-300 mb-1">
+                    Trending too aggressive — averaging {Math.round(pace.actualDailyDelta)} cal/d vs {dailyGoal} cal/d goal.
+                    <div className="text-[11px] text-neutral-400 mt-1.5 leading-snug">
+                      Eat <span className="font-mono text-orange-200 font-bold">+{adj} cal/day</span> for the next 3 days to recover. Today's target already auto-adjusted up by {adj} cal — see Today's Diet tile.
+                    </div>
+                  </div>
+                ) : (
+                  <div className="text-sm text-blue-300 mb-1">
+                    Not enough deficit — averaging {Math.round(pace.actualDailyDelta)} cal/d vs {dailyGoal} cal/d goal.
+                    <div className="text-[11px] text-neutral-400 mt-1.5 leading-snug">
+                      Cut <span className="font-mono text-blue-200 font-bold">{Math.abs(adj)} cal/day</span> for the next 3 days. Today's target already auto-adjusted down by {Math.abs(adj)} cal.
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })() : (
+            <div className="bg-neutral-900 border border-neutral-800 rounded-lg p-3 mb-3">
+              <div className="text-[10px] uppercase tracking-[0.2em] text-neutral-500 font-mono mb-1">COURSE CORRECTION</div>
+              <div className="text-[11px] text-neutral-400 leading-snug">
+                Need {3 - bal.cumulative.days} more day{3 - bal.cumulative.days === 1 ? '' : 's'} of meals logged before pace-based course correction kicks in. Once active, the app will tell you exactly how many extra (or fewer) cal to eat for the next 3 days to land back on your goal, and auto-adjust today's target.
+              </div>
             </div>
           )}
+
           <div className="text-[10px] text-neutral-600 font-mono leading-snug">
             "In" = calories you ate. "Out" = Oura's measured burn (or estimate). Days with under 1,000 cal logged are excluded from the 7-day total so an un-logged day doesn't show as a fake deficit.
           </div>
