@@ -41,7 +41,7 @@ const ACCESSORIES = {
   'decline-fly-tonal':{ name: 'Decline Chest Fly (Tonal)', sets: 3, repsLow: 8,  repsHigh: 10, inc: 5,  startWeight: 40 },
   'goblet-squat':     { name: 'Goblet Squat',           sets: 3, repsLow: 8,  repsHigh: 10, inc: 5,  startWeight: 50 },
   'lat-pulldown':     { name: 'Lat Pulldown',           sets: 3, repsLow: 8,  repsHigh: 10, inc: 5,  startWeight: 120 },
-  'db-ohp':           { name: 'Dumbbell Overhead Press',sets: 3, repsLow: 8,  repsHigh: 10, inc: 5,  startWeight: 35 },
+  'military-press':   { name: 'Military Press',         sets: 3, repsLow: 8,  repsHigh: 10, inc: 5,  startWeight: 95 },
   'plank':            { name: 'Plank',                  sets: 3, repsLow: 30, repsHigh: 60, inc: 0,  startWeight: 0, isTimed: true },
   'romanian-dl':      { name: 'Romanian Deadlift',      sets: 3, repsLow: 8,  repsHigh: 10, inc: 10, startWeight: 135 },
   'leg-press':        { name: 'Leg Press',              sets: 3, repsLow: 10, repsHigh: 12, inc: 10, startWeight: 200 },
@@ -57,7 +57,7 @@ const ACCESSORIES = {
 
 const DAY_TEMPLATES = {
   chest:    { id: 'chest',    name: 'Chest Day',     mainLift: 'bench',    mainName: 'Bench Press',          isVolume: false, accessories: ['incline-db', 'close-grip', 'tricep-ext-tonal', 'decline-fly-tonal'] },
-  fullbody: { id: 'fullbody', name: 'Full Body Day', mainLift: 'bench',    mainName: 'Bench Press (Volume)', isVolume: true,  accessories: ['goblet-squat', 'lat-pulldown', 'db-ohp', 'plank'] },
+  fullbody: { id: 'fullbody', name: 'Full Body Day', mainLift: 'bench',    mainName: 'Bench Press (Volume)', isVolume: true,  accessories: ['goblet-squat', 'lat-pulldown', 'military-press', 'plank'] },
   legs:     { id: 'legs',     name: 'Leg Day',       mainLift: 'squat',    mainName: 'Back Squat',           isVolume: false, accessories: ['romanian-dl', 'leg-press', 'leg-curls', 'calf-raises', 'leg-raises'] },
   back:     { id: 'back',     name: 'Back Day',      mainLift: 'deadlift', mainName: 'Deadlift',             isVolume: false, accessories: ['pull-ups', 'barbell-rows', 'lat-pulldown-back', 'face-pulls', 'bicep-curls'] },
 };
