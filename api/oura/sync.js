@@ -69,17 +69,35 @@ export default async function handler(req, res) {
   const S = indexByDay(sleep);
   const R = indexByDay(readiness);
 
-  // Build the per-day series for the most recent 7 days ending YESTERDAY
-  // (today's data is still partial). Plus today's readiness separately.
+  // Determine the user's "today" key. Oura keys records by the user's LOCAL
+  // date (their profile timezone), but this server runs in UTC -- so for users
+  // in negative-UTC offsets (most of North America), the server's "today" can
+  // be one day ahead of Oura's. That made readiness_today and total_burn_today
+  // come back null because we'd look up tomorrow's date.
+  // Fix: anchor "today" to the latest day key Oura returned, falling back to
+  // UTC if no records exist at all.
+  const allDays = new Set([...A.keys(), ...R.keys(), ...S.keys()]);
+  const sortedDays = Array.from(allDays).sort();
+  const userTodayKey = sortedDays.length > 0
+    ? sortedDays[sortedDays.length - 1]
+    : isoDate(today);
+  const dayBefore = (k) => {
+    const d = new Date(`${k}T12:00:00Z`);
+    d.setUTCDate(d.getUTCDate() - 1);
+    return isoDate(d);
+  };
+  const userYesterdayKey = dayBefore(userTodayKey);
+
+  // Build the per-day series for the 7 days ending YESTERDAY relative to the
+  // user's today (today's data is still partial).
   const days = [];
-  for (let i = 7; i >= 1; i--) {
-    const d = new Date(today);
-    d.setDate(today.getDate() - i);
-    const key = isoDate(d);
+  let cursor = userYesterdayKey;
+  for (let i = 0; i < 7; i++) {
+    const key = cursor;
     const a = A.get(key);
     const s = S.get(key);
     const r = R.get(key);
-    days.push({
+    days.unshift({
       date: key,
       active_cal: a ? a.active_calories : null,
       total_cal: a ? a.total_calories : null,
@@ -87,15 +105,13 @@ export default async function handler(req, res) {
       sleep_score: s ? s.score : null,
       readiness_score: r ? r.score : null,
     });
+    cursor = dayBefore(cursor);
   }
 
-  const todayKey = isoDate(today);
-  const yesterdayKey = isoDate(new Date(today.getTime() - 86_400_000));
-
-  const todayReadiness = R.get(todayKey);
-  const todayActivity = A.get(todayKey);
-  const yesterdayActivity = A.get(yesterdayKey);
-  const yesterdaySleep = S.get(yesterdayKey);
+  const todayReadiness = R.get(userTodayKey);
+  const todayActivity = A.get(userTodayKey);
+  const yesterdayActivity = A.get(userYesterdayKey);
+  const yesterdaySleep = S.get(userYesterdayKey);
 
   // Sleep "score" applies to the night before that date; Oura keys daily_sleep
   // by wake day. We use yesterday's daily_sleep record as "last night".
