@@ -3500,24 +3500,48 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
           .catch(() => {});
       }, [state]);
 
-      // Auto-sync Oura once per session if it's been >6 hours since the last sync,
-      // or if never synced. Oura data updates daily; 6h captures morning refresh.
-      const autoSyncedOuraRef = React.useRef(false);
-      useEffect(() => {
-        if (autoSyncedOuraRef.current) return;
-        if (!state || !cloudSync.getSecret()) return;
-        const last = state.oura?.last_sync_at;
-        if (last && Date.now() - last < 6 * 3_600_000) return;
-        autoSyncedOuraRef.current = true;
+      // Auto-sync Oura whenever the app sees daylight and the last sync is
+      // stale (>30 min). Triggers on initial mount, on every state change once
+      // the threshold has elapsed, AND on visibilitychange (so foregrounding
+      // the app from background pulls fresh data without a manual sync).
+      // Concurrent syncs are blocked by ouraSyncingRef.
+      const ouraSyncingRef = React.useRef(false);
+      const stateRef = React.useRef(state);
+      useEffect(() => { stateRef.current = state; }, [state]);
+      const STALE_MS = 30 * 60_000;
+      const tryOuraSync = () => {
+        if (ouraSyncingRef.current) return;
         const secret = cloudSync.getSecret();
+        if (!secret) return;
+        const last = (stateRef.current && stateRef.current.oura && stateRef.current.oura.last_sync_at) || 0;
+        if (last && Date.now() - last < STALE_MS) return;
+        ouraSyncingRef.current = true;
         fetch('/api/oura/sync', { headers: { 'x-sync-secret': secret } })
           .then(r => r.ok ? r.json() : null)
           .then(j => {
-            if (!j || !j.last_sync_at) return;
-            setState(prev => prev ? { ...prev, oura: j } : prev);
+            if (j && j.last_sync_at) {
+              setState(prev => prev ? { ...prev, oura: j } : prev);
+            }
           })
-          .catch(() => {});
+          .catch(() => {})
+          .finally(() => { ouraSyncingRef.current = false; });
+      };
+
+      // Mount + state change → maybe sync (threshold-gated)
+      useEffect(() => {
+        if (state && cloudSync.getSecret()) tryOuraSync();
       }, [state]);
+
+      // App returns from background → maybe sync
+      useEffect(() => {
+        const onVis = () => { if (document.visibilityState === 'visible') tryOuraSync(); };
+        document.addEventListener('visibilitychange', onVis);
+        window.addEventListener('focus', onVis);
+        return () => {
+          document.removeEventListener('visibilitychange', onVis);
+          window.removeEventListener('focus', onVis);
+        };
+      }, []);
 
       useEffect(() => {
         const loader = document.getElementById('loader');
