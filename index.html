@@ -83,6 +83,7 @@
     const Check = (p) => <Icon {...p}><polyline points="20 6 9 17 4 12"/></Icon>;
     const ChevronRight = (p) => <Icon {...p}><polyline points="9 18 15 12 9 6"/></Icon>;
     const ChevronLeft = (p) => <Icon {...p}><polyline points="15 18 9 12 15 6"/></Icon>;
+    const ChevronDown = (p) => <Icon {...p}><polyline points="6 9 12 15 18 9"/></Icon>;
     const Plus = (p) => <Icon {...p}><path d="M5 12h14"/><path d="M12 5v14"/></Icon>;
     const Minus = (p) => <Icon {...p}><path d="M5 12h14"/></Icon>;
     const Flame = (p) => <Icon {...p}><path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"/></Icon>;
@@ -677,7 +678,10 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
         const meals = (state.mealsByDate && state.mealsByDate[k]) || [];
         const intake = meals.reduce((s, m) => s + (m.kcal || 0), 0);
         const burn = burnByDate.has(k) ? burnByDate.get(k) : fallbackTdee;
-        if (intake > 0 || burnByDate.has(k)) {
+        // Only count days where meals were actually logged (>= 1000 cal).
+        // Otherwise an un-logged day reads as "ate 0 cal vs full day burn"
+        // and the cumulative becomes nonsense (huge fake deficits).
+        if (intake >= 1000) {
           cumIntake += intake;
           cumBurn += burn;
           daysWithData++;
@@ -1052,6 +1056,29 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
     // ============================================================
     // SPARKLINE (mini SVG line chart)
     // ============================================================
+    // Tap-to-expand card. Summary always visible; detail hidden until tapped.
+    // `headline` is a JSX node shown next to the chevron on the right.
+    // `summary` is the always-visible left-hand block (label + key number).
+    const ExpandableCard = ({ summary, headline, children, defaultExpanded = false }) => {
+      const [expanded, setExpanded] = useState(defaultExpanded);
+      return (
+        <div className="bg-neutral-950 border border-neutral-800 rounded-xl overflow-hidden mb-3">
+          <button onClick={() => setExpanded(!expanded)} className="w-full p-4 text-left flex items-center justify-between gap-3 hover:bg-neutral-900/30 active:scale-[0.995]">
+            <div className="flex-1 min-w-0">{summary}</div>
+            <div className="flex items-center gap-2 shrink-0">
+              {headline}
+              <div className="text-neutral-600">{expanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}</div>
+            </div>
+          </button>
+          {expanded && (
+            <div className="px-4 pb-4 border-t border-neutral-900 pt-3">
+              {children}
+            </div>
+          )}
+        </div>
+      );
+    };
+
     const Sparkline = ({ points, color = '#F97316', height = 56, fill = true }) => {
       if (!points || points.length < 2) {
         return <div className="text-[10px] text-neutral-600 font-mono italic" style={{ height }}>not enough data yet</div>;
@@ -1133,34 +1160,47 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
       const wDelta = wPoints.length >= 2 ? formatDelta(wPoints[wPoints.length - 1].value, valueDaysAgo(wPoints, 30), ' lb', 1) : '—';
       const bfDelta = bfPoints.length >= 2 ? formatDelta(bfPoints[bfPoints.length - 1].value, valueDaysAgo(bfPoints, 30), '%', 1) : '—';
       const lastSync = bs.withingsLastSync ? formatRelative(bs.withingsLastSync) : null;
-      return (
-        <button onClick={onOpenSettings} className="w-full text-left bg-neutral-950 border border-neutral-800 rounded-xl p-4 mb-3 hover:border-neutral-700 active:scale-[0.99]">
-          <div className="flex items-center justify-between mb-3">
-            <div className="text-[10px] uppercase tracking-[0.2em] text-neutral-500 font-mono">BODY COMPOSITION</div>
-            {lastSync && <div className="text-[10px] uppercase tracking-wider text-green-400 font-mono">Withings · {lastSync}</div>}
+      const summary = (
+        <div>
+          <div className="text-[10px] uppercase tracking-[0.2em] text-neutral-500 font-mono mb-1">BODY COMPOSITION</div>
+          <div className="flex items-baseline gap-3">
+            <div>
+              <span className="font-mono text-2xl font-bold text-neutral-50">{bs.weight}</span>
+              <span className="text-[10px] text-neutral-500 font-mono ml-1">lb</span>
+            </div>
+            <div>
+              <span className="font-mono text-xl font-bold text-neutral-50">{bs.bodyFatPct ?? '—'}</span>
+              <span className="text-[10px] text-neutral-500 font-mono ml-1">% bf</span>
+            </div>
+            <div className="text-[10px] text-neutral-500 font-mono">→ {bs.goalBodyFatPct}%</div>
           </div>
+          <div className="text-[10px] text-neutral-600 font-mono mt-1">
+            {lastSync ? `Withings · ${lastSync}` : 'tap to log weigh-in or connect Withings'}
+          </div>
+        </div>
+      );
+      return (
+        <ExpandableCard summary={summary}>
           <div className="grid grid-cols-2 gap-4">
             <div>
               <div className="flex items-baseline gap-1.5 mb-1">
-                <div className="font-mono text-2xl font-bold text-neutral-50">{bs.weight}</div>
-                <div className="text-xs text-neutral-500 font-mono">lb</div>
+                <div className="text-[10px] uppercase tracking-wider text-neutral-500 font-mono">Weight</div>
                 <div className={`ml-auto text-[10px] font-mono ${wPoints.length >= 2 && wPoints[wPoints.length - 1].value - valueDaysAgo(wPoints, 30) < 0 ? 'text-orange-300' : 'text-neutral-400'}`}>{wDelta} <span className="text-neutral-600">30d</span></div>
               </div>
               <Sparkline points={wPoints} color="#F97316" height={36} />
             </div>
             <div>
               <div className="flex items-baseline gap-1.5 mb-1">
-                <div className="font-mono text-2xl font-bold text-neutral-50">{bs.bodyFatPct ?? '—'}</div>
-                <div className="text-xs text-neutral-500 font-mono">% bf</div>
+                <div className="text-[10px] uppercase tracking-wider text-neutral-500 font-mono">Body fat %</div>
                 <div className={`ml-auto text-[10px] font-mono ${bfPoints.length >= 2 && bfPoints[bfPoints.length - 1].value - valueDaysAgo(bfPoints, 30) < 0 ? 'text-orange-300' : 'text-neutral-400'}`}>{bfDelta} <span className="text-neutral-600">30d</span></div>
               </div>
               <Sparkline points={bfPoints} color="#60a5fa" height={36} />
             </div>
           </div>
-          <div className="text-[10px] text-neutral-600 mt-3 font-mono uppercase tracking-wider">
-            Goal {bs.goalBodyFatPct}% · {wPoints.length + bfPoints.length === 0 ? 'tap to log weigh-in' : 'tap to update or connect Withings'}
-          </div>
-        </button>
+          <button onClick={(e) => { e.stopPropagation(); onOpenSettings(); }} className="w-full mt-3 py-2 rounded-lg border border-neutral-800 text-neutral-300 text-[10px] uppercase tracking-wider font-mono font-semibold hover:bg-neutral-900">
+            Log weigh-in or sync Withings
+          </button>
+        </ExpandableCard>
       );
     };
 
@@ -1194,12 +1234,30 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
         .map((d) => ({ ts: new Date(d.date).getTime(), value: d.active_cal }))
         .filter((p) => p.ts && p.value != null);
 
-      return (
-        <button onClick={onOpenSettings} className="w-full text-left bg-neutral-950 border border-neutral-800 rounded-xl p-4 mb-3 hover:border-neutral-700 active:scale-[0.99]">
-          <div className="flex items-center justify-between mb-3">
+      const summary = (
+        <div>
+          <div className="flex items-center justify-between mb-1">
             <div className="text-[10px] uppercase tracking-[0.2em] text-neutral-500 font-mono">RECOVERY</div>
-            <div className="text-[10px] uppercase tracking-wider text-green-400 font-mono">Oura · {last}</div>
           </div>
+          <div className="flex items-baseline gap-3">
+            <div>
+              <span className={`font-mono text-2xl font-bold ${scoreColor(o.sleep_score_yesterday)}`}>{o.sleep_score_yesterday ?? '—'}</span>
+              <span className="text-[9px] text-neutral-500 uppercase tracking-wider font-mono ml-1">sleep</span>
+            </div>
+            <div>
+              <span className={`font-mono text-xl font-bold ${scoreColor(o.readiness_score_today)}`}>{o.readiness_score_today ?? '—'}</span>
+              <span className="text-[9px] text-neutral-500 uppercase tracking-wider font-mono ml-1">ready</span>
+            </div>
+            <div>
+              <span className="font-mono text-xl font-bold text-neutral-200">{o.active_burn_yesterday ?? '—'}</span>
+              <span className="text-[9px] text-neutral-500 uppercase tracking-wider font-mono ml-1">burn</span>
+            </div>
+          </div>
+          <div className="text-[10px] text-neutral-600 font-mono mt-1">TDEE {o.total_burn_7d_avg} · Oura {last}</div>
+        </div>
+      );
+      return (
+        <ExpandableCard summary={summary}>
           <div className="grid grid-cols-3 gap-2 mb-3">
             <div>
               <div className="text-[10px] uppercase tracking-wider text-neutral-500 font-mono">Sleep</div>
@@ -1235,7 +1293,7 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
           <div className="text-[10px] text-neutral-600 mt-2 font-mono uppercase tracking-wider">
             TDEE {o.total_burn_7d_avg} · macros use this as your baseline
           </div>
-        </button>
+        </ExpandableCard>
       );
     };
 
@@ -1327,27 +1385,29 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
       const overall = overallStrengthPercentile(state);
       const overallColor = overall == null ? 'text-neutral-500'
         : overall >= 75 ? 'text-green-400' : overall >= 50 ? 'text-orange-300' : overall >= 25 ? 'text-neutral-300' : 'text-red-400';
-      return (
-        <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-4 mb-3">
-          <div className="flex items-center justify-between mb-3">
-            <div className="text-[10px] uppercase tracking-[0.2em] text-neutral-500 font-mono">TRAINING MAXES</div>
-            <div className="text-[10px] uppercase tracking-wider text-neutral-600 font-mono">
-              {bs.weight ? `${bs.weight} lb · ${bs.age}y` : 'vs 90 days'}
+      const summary = (
+        <div>
+          <div className="text-[10px] uppercase tracking-[0.2em] text-neutral-500 font-mono mb-1">TRAINING MAXES</div>
+          {overall != null ? (
+            <div className="flex items-baseline gap-2">
+              <div className={`font-mono text-2xl font-bold leading-none ${overallColor}`}>{overall}<span className="text-sm">th</span></div>
+              <div className={`text-[10px] uppercase tracking-widest font-mono font-semibold ${overallColor}`}>{percentileLabel(overall)}</div>
             </div>
-          </div>
-          {overall != null && (
-            <div className="flex items-baseline justify-between mb-3 px-1">
-              <div className="text-[10px] uppercase tracking-[0.2em] text-neutral-500 font-mono">Overall strength</div>
-              <div className="font-mono text-sm">
-                <span className={`font-bold ${overallColor}`}>{overall}<span className="text-[10px]">th</span></span>
-                <span className="text-neutral-600 ml-1 uppercase tracking-wider text-[10px]">{percentileLabel(overall)}</span>
-              </div>
+          ) : (
+            <div className="font-mono text-base text-neutral-300">
+              Bench {tm.bench} · Squat {tm.squat} · DL {tm.deadlift}
             </div>
           )}
+          <div className="text-[10px] text-neutral-600 font-mono mt-1">
+            {bs.weight ? `Overall strength · ${bs.weight} lb · ${bs.age}y cohort` : 'set body stats to see percentile'}
+          </div>
+        </div>
+      );
+      return (
+        <ExpandableCard summary={summary}>
           <div className="grid grid-cols-3 gap-3">
             {lifts.map(l => {
               const delta = l.pts.length >= 2 ? formatDelta(l.pts[l.pts.length - 1].value, valueDaysAgo(l.pts, 90), '', 0) : '—';
-              // Use e1RM if we have one, otherwise treat TM as an approximation of 1RM.
               const strengthValue = l.e1RM || l.val;
               const pct = l.standards ? computePercentile(strengthValue, l.standards) : null;
               const next = l.standards ? nextMilestone(strengthValue, l.standards) : null;
@@ -1380,7 +1440,7 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
               );
             })}
           </div>
-        </div>
+        </ExpandableCard>
       );
     };
 
@@ -1419,12 +1479,22 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
         );
       }
       const goalText = dailyGoal < 0 ? `${dailyGoal} cal/d (cut)` : dailyGoal > 0 ? `+${dailyGoal} cal/d (bulk)` : 'maintenance';
+      const summary = (
+        <div>
+          <div className="text-[10px] uppercase tracking-[0.2em] text-neutral-500 font-mono mb-1">CALORIE BALANCE</div>
+          {bal.cumulative.days >= 3 ? (
+            <div className="flex items-baseline gap-2">
+              <div className={`font-mono text-2xl font-bold leading-none ${goalZone.color}`}>{fmt(bal.cumulative.net)}</div>
+              <div className={`text-[10px] uppercase tracking-widest font-mono font-semibold ${goalZone.color}`}>{goalZone.label}</div>
+            </div>
+          ) : (
+            <div className="text-sm text-neutral-400">Log {3 - bal.cumulative.days} more day{3 - bal.cumulative.days === 1 ? '' : 's'} to see 7-day pace</div>
+          )}
+          <div className="text-[10px] text-neutral-600 font-mono mt-1">7d cumulative · goal {goalText}</div>
+        </div>
+      );
       return (
-        <button onClick={onOpenDiet} className="w-full text-left bg-neutral-950 border border-neutral-800 rounded-xl p-4 mb-3 hover:border-neutral-700 active:scale-[0.99]">
-          <div className="flex items-center justify-between mb-3">
-            <div className="text-[10px] uppercase tracking-[0.2em] text-neutral-500 font-mono">CALORIE BALANCE</div>
-            <div className="text-[10px] uppercase tracking-wider text-neutral-600 font-mono">goal {goalText}</div>
-          </div>
+        <ExpandableCard summary={summary}>
           <div className="grid grid-cols-3 gap-2 mb-3">
             <div>
               <div className="text-[10px] uppercase tracking-wider text-neutral-500 font-mono">Today</div>
@@ -1446,18 +1516,21 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
               <div className="text-[10px] uppercase tracking-wider text-neutral-500 font-mono">7-day</div>
               <div className={`font-mono text-xl font-bold leading-tight ${goalZone.color}`}>{fmt(bal.cumulative.net)}</div>
               <div className="text-[9px] uppercase tracking-wider text-neutral-600 font-mono mt-0.5">
-                {bal.cumulative.days}/7 days · ≈{(Math.abs(bal.cumulative.net) / 3500).toFixed(1)} lb {bal.cumulative.net < 0 ? 'loss' : 'gain'}
+                {bal.cumulative.days}/7 days logged · ≈{(Math.abs(bal.cumulative.net) / 3500).toFixed(1)} lb {bal.cumulative.net < 0 ? 'loss' : 'gain'}
               </div>
             </div>
           </div>
           {bal.cumulative.days >= 3 && (
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 mb-2">
               <div className={`w-1.5 h-1.5 rounded-full ${goalZone.dot}`} />
               <div className={`text-[10px] uppercase tracking-widest font-mono font-semibold ${goalZone.color}`}>{goalZone.label}</div>
               <div className="text-[10px] text-neutral-600 font-mono">· vs goal {fmt(weeklyGoal)} cal/wk</div>
             </div>
           )}
-        </button>
+          <div className="text-[10px] text-neutral-600 font-mono leading-snug">
+            "In" = calories you ate. "Out" = Oura's measured burn (or estimate). Days with under 1,000 cal logged are excluded from the 7-day total so an un-logged day doesn't show as a fake deficit.
+          </div>
+        </ExpandableCard>
       );
     };
 
