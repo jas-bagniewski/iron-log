@@ -41,7 +41,6 @@ const ACCESSORIES = {
   'decline-fly-tonal':{ name: 'Decline Chest Fly (Tonal)', sets: 3, repsLow: 8,  repsHigh: 10, inc: 5,  startWeight: 40 },
   'goblet-squat':     { name: 'Goblet Squat',           sets: 3, repsLow: 8,  repsHigh: 10, inc: 5,  startWeight: 50 },
   'lat-pulldown':     { name: 'Lat Pulldown',           sets: 3, repsLow: 8,  repsHigh: 10, inc: 5,  startWeight: 120 },
-  'military-press':   { name: 'Military Press',         sets: 3, repsLow: 8,  repsHigh: 10, inc: 5,  startWeight: 95 },
   'plank':            { name: 'Plank',                  sets: 3, repsLow: 30, repsHigh: 60, inc: 0,  startWeight: 0, isTimed: true },
   'romanian-dl':      { name: 'Romanian Deadlift',      sets: 3, repsLow: 8,  repsHigh: 10, inc: 10, startWeight: 135 },
   'leg-press':        { name: 'Leg Press',              sets: 3, repsLow: 10, repsHigh: 12, inc: 10, startWeight: 200 },
@@ -57,7 +56,12 @@ const ACCESSORIES = {
 
 const DAY_TEMPLATES = {
   chest:    { id: 'chest',    name: 'Chest Day',     mainLift: 'bench',    mainName: 'Bench Press',          isVolume: false, accessories: ['incline-db', 'close-grip', 'tricep-ext-tonal', 'decline-fly-tonal'] },
-  fullbody: { id: 'fullbody', name: 'Full Body Day', mainLift: 'bench',    mainName: 'Bench Press (Volume)', isVolume: true,  accessories: ['goblet-squat', 'lat-pulldown', 'military-press', 'plank'] },
+  fullbody: {
+    id: 'fullbody', name: 'Full Body Day',
+    mainLift: 'press', mainName: 'Military Press', isVolume: false,
+    supplementary: { lift: 'bench', name: 'Bench Press (BBB)', pct: 0.60, deloadPct: 0.50, sets: 5, deloadSets: 3, reps: 10, deloadReps: 5 },
+    accessories: ['goblet-squat', 'lat-pulldown', 'plank'],
+  },
   legs:     { id: 'legs',     name: 'Leg Day',       mainLift: 'squat',    mainName: 'Back Squat',           isVolume: false, accessories: ['romanian-dl', 'leg-press', 'leg-curls', 'calf-raises', 'leg-raises'] },
   back:     { id: 'back',     name: 'Back Day',      mainLift: 'deadlift', mainName: 'Deadlift',             isVolume: false, accessories: ['pull-ups', 'barbell-rows', 'lat-pulldown-back', 'face-pulls', 'bicep-curls'] },
 };
@@ -180,11 +184,31 @@ function buildSessionPreview(dayId, state) {
       lastReps: log.lastReps || null,
     };
   }).filter(Boolean);
+
+  // Supplementary block (e.g., BBB bench on Full Body day). Submaximal volume work.
+  let supplementary = null;
+  if (tpl.supplementary) {
+    const sup = tpl.supplementary;
+    const isDeload = state.week === 4;
+    const pct = isDeload ? (sup.deloadPct != null ? sup.deloadPct : sup.pct) : sup.pct;
+    const count = isDeload ? (sup.deloadSets != null ? sup.deloadSets : sup.sets) : sup.sets;
+    const reps = isDeload ? (sup.deloadReps != null ? sup.deloadReps : sup.reps) : sup.reps;
+    const supTm = state.trainingMaxes && state.trainingMaxes[sup.lift];
+    if (supTm != null) {
+      const w = round5(supTm * pct);
+      supplementary = {
+        lift: sup.lift, name: sup.name,
+        sets: Array.from({ length: count }, () => ({ weight: w, targetReps: reps, isAmrap: false })),
+      };
+    }
+  }
+
   return {
     dayId, name: tpl.name, mainLift: tpl.mainLift, mainName: tpl.mainName,
     isVolume: tpl.isVolume,
     weekLabel: WEEK_SCHEMES[state.week] ? WEEK_SCHEMES[state.week].label : '',
     mainSets: buildMainSets(tm, state.week, tpl.isVolume),
+    supplementary,
     accessories,
   };
 }
