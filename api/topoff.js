@@ -4,28 +4,26 @@
 //
 // Auth: same x-sync-secret header as the other endpoints.
 
-const SYSTEM_PROMPT = `You suggest specific snacks to close end-of-day macro gaps.
+const SYSTEM_PROMPT = `You suggest end-of-day snacks to hit a protein gap. Each suggestion is a SINGLE food item, portion-sized so it lands close to the user's remaining protein target.
 
 You are given:
-- The user's remaining macros for the day: kcal, protein_g, carbs_g, fat_g
-- The user's preferences: a free-text description of foods they like and foods to avoid
-- A priority: usually "protein_first" (close the protein gap first; carbs/fat are flex)
+- remaining_protein_g (the gap to close)
+- remaining_carbs_g, remaining_fat_g, remaining_kcal (for context only — do NOT try to balance these)
+- preferences: free-text describing which specific foods the user keeps at home
 
-Suggest 3-5 specific snack options. Each option:
-1. PRIORITIZES closing the protein gap (most important — non-negotiable for muscle retention in a cut)
-2. Uses foods the user likes
-3. Is a realistic single-portion snack (not a full meal)
-4. Comes in under or close to the remaining calorie budget when possible
-5. Has macros that move the user toward their targets, not away
+RULES:
+1. ONE food per suggestion. Never combine items ("yogurt + berries", "shake + popcorn", etc.).
+2. Pick from the user's preferences list. Don't invent foods they didn't mention.
+3. Size the portion so its protein content is within ±3g of remaining_protein_g. If a food's max realistic single-portion can't hit the gap, scale to its biggest reasonable portion and say so.
+4. Pick foods with the BEST protein-per-calorie ratio first. The user is in a cut — minimise unnecessary carbs/fat. Prefer lean protein sources (cottage cheese, Greek yogurt, jerky, protein shake) over calorie-dense foods (nuts, chocolate) unless the user specifically lacks lean options.
+5. Provide 4–5 alternatives so the user can pick. Order from leanest (best protein/cal) to most calorie-dense.
 
-Prefer high-protein, lower-carb options when priority is "protein_first" since carbs are flex space in a cut.
-
-If the user's preferences list anything they explicitly avoid, never suggest those.
+For each suggestion, the macros must reflect the SPECIFIC PORTION you list, not a generic per-serving entry. If you say "1.8 oz beef jerky", compute the macros for 1.8 oz (not the standard 1 oz serving).
 
 Output VALID JSON ONLY, no markdown, no commentary:
 {
   "suggestions": [
-    { "name": "string (short)", "portion": "string (specific portion size)", "kcal": number, "protein_g": number, "carbs_g": number, "fat_g": number, "why": "string (one short line)" }
+    { "name": "Food name only (e.g. 'Beef jerky', not 'Beef jerky with crackers')", "portion": "specific scaled portion (e.g. '1.8 oz', '1.5 cups', '2 sticks')", "kcal": number, "protein_g": number, "carbs_g": number, "fat_g": number, "why": "one short line, e.g. 'Hits 27g protein, only 130 cal'" }
   ]
 }`;
 
@@ -46,17 +44,16 @@ export default async function handler(req, res) {
   const preferences = (body && body.preferences) || '';
   const priority = (body && body.priority) || 'protein_first';
 
-  const userMsg = `My remaining macros for today:
-- ${Math.round(remaining.protein || 0)}g protein
-- ${Math.round(remaining.carbs || 0)}g carbs
-- ${Math.round(remaining.fat || 0)}g fat
-- ${Math.round(remaining.kcal || 0)} kcal budget
+  const userMsg = `Remaining today:
+- protein gap: ${Math.round(remaining.protein || 0)}g (THIS is what I want to hit)
+- carbs remaining: ${Math.round(remaining.carbs || 0)}g (ignore, flex space)
+- fat remaining: ${Math.round(remaining.fat || 0)}g (ignore)
+- cal budget remaining: ${Math.round(remaining.kcal || 0)} (ignore)
 
-Priority: ${priority}.
+My snack preferences:
+${preferences ? preferences.trim() : '(none provided — use common high-protein grab-and-go options)'}
 
-My food preferences: ${preferences ? preferences.trim() : 'no specific preferences listed'}
-
-Suggest 3-5 snacks.`;
+Give me 4-5 single-item options sized to hit the protein gap. No combinations. Order leanest first.`;
 
   try {
     const r = await fetch('https://api.anthropic.com/v1/messages', {
