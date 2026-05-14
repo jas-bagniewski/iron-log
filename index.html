@@ -1485,12 +1485,31 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
       const dailyGoal = targets.baseKcal - targets.maintenance; // negative cutting, 0 maintain, positive bulk
       const weeklyGoal = dailyGoal * 7;
       const fmt = (n) => n == null ? '—' : `${n > 0 ? '+' : ''}${Math.round(n)}`;
-      const netColor = (n) => {
-        if (n == null) return 'text-neutral-500';
-        if (n < -100) return 'text-orange-300';   // deficit
-        if (n > 100)  return 'text-blue-300';     // surplus
-        return 'text-green-400';                  // maintenance window
+      // Per-day zone vs the day's expected delta (for Today, prorate to time of
+      // day so a -200 net at noon isn't read as "too aggressive" against a
+      // full-day -300 goal). Returns color + short label so the user can
+      // read at a glance if a day is healthy, mildly off, or course-correctable.
+      const dayZone = (net, expected) => {
+        if (net == null || expected == null) return { color: 'text-neutral-500', label: null };
+        const distance = net - expected; // > 0 = ate too much, < 0 = too aggressive
+        const abs = Math.abs(distance);
+        if (abs <= 150) return { color: 'text-green-400', label: 'On target' };
+        if (abs <= 400) return {
+          color: 'text-orange-300',
+          label: distance < 0
+            ? (dailyGoal < 0 ? 'A bit aggressive' : 'Light on intake')
+            : (dailyGoal < 0 ? 'Light deficit' : 'A bit over goal'),
+        };
+        return {
+          color: 'text-red-400',
+          label: distance < 0
+            ? (dailyGoal < 0 ? 'Too aggressive' : 'Way under')
+            : (dailyGoal < 0 ? 'Way over goal' : 'Way over'),
+        };
       };
+      const todayExpected = dailyGoal * (bal.today.fractionOfDay || 1);
+      const todayZone = dayZone(bal.today.net, todayExpected);
+      const yesterdayZone = bal.yesterday.hasIntake ? dayZone(bal.yesterday.net, dailyGoal) : { color: 'text-neutral-500', label: null };
       // Goal-aware coloring for the 7-day cumulative number.
       // "Goal" = weeklyGoal cal. ±700 cal/week (~100/d) = green, ±2100 = orange, beyond = red.
       const goalZone = (() => {
@@ -1530,16 +1549,22 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
           <div className="grid grid-cols-3 gap-2 mb-3">
             <div>
               <div className="text-[10px] uppercase tracking-wider text-neutral-500 font-mono">Today</div>
-              <div className={`font-mono text-xl font-bold leading-tight ${netColor(bal.today.net)}`}>{fmt(bal.today.net)}</div>
+              <div className={`font-mono text-xl font-bold leading-tight ${todayZone.color}`}>{fmt(bal.today.net)}</div>
+              {todayZone.label && (
+                <div className={`text-[9px] uppercase tracking-wider font-mono font-semibold ${todayZone.color}`}>{todayZone.label}</div>
+              )}
               <div className="text-[9px] uppercase tracking-wider text-neutral-600 font-mono mt-0.5">
                 {Math.round(bal.today.intake)} in · {Math.round(bal.today.burn)} out{bal.today.fromOura ? '' : ' (est)'}
               </div>
             </div>
             <div>
               <div className="text-[10px] uppercase tracking-wider text-neutral-500 font-mono">Yesterday</div>
-              <div className={`font-mono text-xl font-bold leading-tight ${netColor(bal.yesterday.net)}`}>
+              <div className={`font-mono text-xl font-bold leading-tight ${yesterdayZone.color}`}>
                 {bal.yesterday.hasIntake ? fmt(bal.yesterday.net) : '—'}
               </div>
+              {yesterdayZone.label && (
+                <div className={`text-[9px] uppercase tracking-wider font-mono font-semibold ${yesterdayZone.color}`}>{yesterdayZone.label}</div>
+              )}
               <div className="text-[9px] uppercase tracking-wider text-neutral-600 font-mono mt-0.5">
                 {bal.yesterday.hasIntake ? `${Math.round(bal.yesterday.intake)} in · ${Math.round(bal.yesterday.burn)} out` : 'no meals logged'}
               </div>
