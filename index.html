@@ -759,6 +759,40 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
       return t;
     };
 
+    // Roll up unique meals across all logged days, grouped by name (case
+    // insensitive). Returns most-frequently-eaten first, with the latest
+    // macro values for each. Used by AddMealView for one-tap repeat logging.
+    const recentMeals = (state, limit = 12) => {
+      const tally = new Map();
+      const dates = Object.keys(state.mealsByDate || {});
+      for (const date of dates) {
+        for (const m of (state.mealsByDate[date] || [])) {
+          const key = (m.name || '').toLowerCase().trim();
+          if (!key) continue;
+          const ts = m.loggedAt ? new Date(m.loggedAt).getTime() : new Date(date).getTime();
+          const existing = tally.get(key);
+          if (existing) {
+            existing.count += 1;
+            if (ts > existing.lastTs) {
+              existing.lastTs = ts;
+              existing.name = m.name;
+              existing.kcal = m.kcal; existing.protein = m.protein;
+              existing.carbs = m.carbs; existing.fat = m.fat;
+              existing.items = m.items;
+            }
+          } else {
+            tally.set(key, {
+              name: m.name, kcal: m.kcal, protein: m.protein, carbs: m.carbs, fat: m.fat,
+              items: m.items, count: 1, lastTs: ts,
+            });
+          }
+        }
+      }
+      return Array.from(tally.values())
+        .sort((a, b) => b.count - a.count || b.lastTs - a.lastTs)
+        .slice(0, limit);
+    };
+
     const fileToBase64 = (file) => new Promise((res, rej) => {
       const r = new FileReader();
       r.onload = () => {
@@ -2530,12 +2564,25 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
       );
     };
 
-    const AddMealView = ({ onSave, onCancel }) => {
-      const [mode, setMode] = useState('choose'); // choose | manual | photo-pending | photo-confirm
+    const AddMealView = ({ state, onSave, onCancel }) => {
+      const [mode, setMode] = useState('choose'); // choose | manual | photo-pending | photo-confirm | recent-all
       const [analyzed, setAnalyzed] = useState(null);
       const [error, setError] = useState(null);
       const cameraRef = React.useRef(null);
       const libraryRef = React.useRef(null);
+      const recents = state ? recentMeals(state, 12) : [];
+
+      const repeatMeal = (m) => {
+        onSave({
+          name: m.name,
+          kcal: m.kcal || 0,
+          protein: m.protein || 0,
+          carbs: m.carbs || 0,
+          fat: m.fat || 0,
+          items: m.items || null,
+          source: 'repeat',
+        });
+      };
 
       const takePhoto = () => { setError(null); cameraRef.current?.click(); };
       const pickFromLibrary = () => { setError(null); libraryRef.current?.click(); };
@@ -2593,6 +2640,35 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
 
               {mode === 'choose' && (
                 <div className="space-y-3">
+                  {recents.length > 0 && (
+                    <div>
+                      <div className="text-[10px] uppercase tracking-[0.2em] text-neutral-500 font-mono mb-2">REPEAT A MEAL</div>
+                      <div className="space-y-1.5 mb-3">
+                        {recents.slice(0, 5).map((m, i) => (
+                          <button key={i} onClick={() => repeatMeal(m)}
+                            className="w-full px-3 py-2.5 rounded-lg border border-neutral-800 hover:border-orange-500/50 bg-neutral-950 text-left flex items-center justify-between gap-3 active:scale-[0.99]">
+                            <div className="min-w-0 flex-1">
+                              <div className="text-sm font-semibold text-neutral-50 truncate">{m.name}</div>
+                              <div className="text-[10px] text-neutral-500 font-mono mt-0.5">
+                                {m.kcal} cal · P {m.protein}g · C {m.carbs}g · F {m.fat}g
+                                {m.count > 1 && <span className="text-neutral-600 ml-2">· used {m.count}×</span>}
+                              </div>
+                            </div>
+                            <div className="shrink-0 w-8 h-8 rounded-lg bg-orange-500/10 border border-orange-500/30 flex items-center justify-center text-orange-400">
+                              <Plus size={16} strokeWidth={3} />
+                            </div>
+                          </button>
+                        ))}
+                        {recents.length > 5 && (
+                          <button onClick={() => setMode('recent-all')}
+                            className="w-full py-2 text-[11px] uppercase tracking-wider text-neutral-400 font-mono hover:text-neutral-100">
+                            Show all {recents.length} recent meals →
+                          </button>
+                        )}
+                      </div>
+                      <div className="text-[10px] uppercase tracking-[0.2em] text-neutral-500 font-mono mb-2 mt-4">NEW MEAL</div>
+                    </div>
+                  )}
                   <button onClick={takePhoto}
                     className="w-full p-4 rounded-xl border border-neutral-800 hover:border-orange-500/50 bg-gradient-to-br from-neutral-950 to-neutral-900 text-left flex items-center gap-4 active:scale-[0.99]">
                     <div className="w-12 h-12 rounded-lg bg-orange-500/10 border border-orange-500/30 flex items-center justify-center shrink-0">
@@ -2623,6 +2699,33 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
                       <div className="text-xs text-neutral-500 mt-0.5">e.g. "4 boiled eggs" → AI estimate, or enter macros directly</div>
                     </div>
                   </button>
+                </div>
+              )}
+
+              {mode === 'recent-all' && (
+                <div>
+                  <button onClick={() => setMode('choose')}
+                    className="flex items-center gap-1 text-neutral-400 text-xs uppercase tracking-wider font-mono mb-3 hover:text-neutral-100">
+                    <ChevronLeft size={14} /> Back
+                  </button>
+                  <div className="text-[10px] uppercase tracking-[0.2em] text-neutral-500 font-mono mb-2">ALL RECENT MEALS</div>
+                  <div className="space-y-1.5">
+                    {recents.map((m, i) => (
+                      <button key={i} onClick={() => repeatMeal(m)}
+                        className="w-full px-3 py-2.5 rounded-lg border border-neutral-800 hover:border-orange-500/50 bg-neutral-950 text-left flex items-center justify-between gap-3 active:scale-[0.99]">
+                        <div className="min-w-0 flex-1">
+                          <div className="text-sm font-semibold text-neutral-50 truncate">{m.name}</div>
+                          <div className="text-[10px] text-neutral-500 font-mono mt-0.5">
+                            {m.kcal} cal · P {m.protein}g · C {m.carbs}g · F {m.fat}g
+                            {m.count > 1 && <span className="text-neutral-600 ml-2">· used {m.count}×</span>}
+                          </div>
+                        </div>
+                        <div className="shrink-0 w-8 h-8 rounded-lg bg-orange-500/10 border border-orange-500/30 flex items-center justify-center text-orange-400">
+                          <Plus size={16} strokeWidth={3} />
+                        </div>
+                      </button>
+                    ))}
+                  </div>
                 </div>
               )}
 
@@ -2817,7 +2920,7 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
             </div>
           </div>
 
-          {adding && <AddMealView onSave={addMeal} onCancel={() => setAdding(false)} />}
+          {adding && <AddMealView state={state} onSave={addMeal} onCancel={() => setAdding(false)} />}
           {editing && <EditMealView meal={editing} onSave={saveEdit} onDelete={deleteMeal} onCancel={() => setEditing(null)} />}
           {topOff && <TopOffView state={state} onUpdateState={onUpdateState} onSave={(meal) => { addMeal(meal); setTopOff(false); }} onCancel={() => setTopOff(false)} />}
         </div>
