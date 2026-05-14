@@ -176,12 +176,14 @@ export const defaultState: AppState = {
 // ============================================================
 export const buildMainSets = (tm: number, week: number, isVolume: boolean): MainSet[] => {
   if (isVolume) {
+    // BBB supplementary: 5x10 at 60% TM; deload week drops to 3x5 at 50%.
     const isDeload = week === 4;
     const pct = isDeload ? 0.50 : 0.60;
     const count = isDeload ? 3 : 5;
+    const reps = isDeload ? 5 : 10;
     const w = round5(tm * pct);
     return Array.from({ length: count }, (_, i) => ({
-      id: `main-${i}`, weight: w, targetReps: 5, isAmrap: false, completed: false, actualReps: null,
+      id: `main-${i}`, weight: w, targetReps: reps, isAmrap: false, completed: false, actualReps: null,
     }));
   }
   return WEEK_SCHEMES[week].sets.map((s, i) => ({

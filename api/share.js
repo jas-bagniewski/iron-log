@@ -148,11 +148,13 @@ function computeMacroTargets(bs, oura, pace) {
 
 function buildMainSets(tm, week, isVolume) {
   if (isVolume) {
+    // BBB supplementary: 5x10 at 60% TM; deload week drops to 3x5 at 50%.
     const isDeload = week === 4;
     const pct = isDeload ? 0.50 : 0.60;
     const count = isDeload ? 3 : 5;
+    const reps = isDeload ? 5 : 10;
     const w = round5(tm * pct);
-    return Array.from({ length: count }, (_, i) => ({ weight: w, targetReps: 5, isAmrap: false }));
+    return Array.from({ length: count }, () => ({ weight: w, targetReps: reps, isAmrap: false }));
   }
   return WEEK_SCHEMES[week].sets.map((s) => ({
     weight: round5(tm * s.pct), targetReps: s.reps, isAmrap: !!s.isAmrap, minReps: s.minReps,
