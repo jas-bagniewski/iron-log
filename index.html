@@ -501,6 +501,28 @@
     // ============================================================
     const STORAGE_KEY = 'iron-log:v2';
     const SECRET_KEY = 'iron-log:syncSecret';
+    // Default snack preferences seeded into state.snackPreferences on first load.
+    // Forks should replace this with their own. Used by /api/topoff to ground
+    // suggestions in the snacks the user actually keeps at home.
+    const DEFAULT_SNACK_PREFERENCES = `Late-evening grab-and-go snacks I keep in the house. Never cook — only ready-to-eat:
+
+PROTEIN STARS (use to close the protein gap):
+- Cottage cheese (~25g protein per cup, casein-rich — perfect for overnight)
+- Greek yogurt (~20g per cup, similar role to cottage cheese)
+- Beef jerky (~10-15g per oz, shelf-stable)
+- Pure Protein pre-mixed shake (30g protein, 140 cal — kept in fridge)
+
+CARB / FLEX:
+- Berries (low cal, pairs with cottage cheese or yogurt)
+- Popcorn (low protein but fits flex carb budget)
+
+TREATS (fit only if cal/fat budget allows after protein is hit):
+- Cashew nuts (small portion — 30g = 5g protein for 170 cal, calorie-dense)
+- Pistachio nuts (similar — 30g = 6g protein for 160 cal)
+- Dark chocolate (~150 cal for a square or two, no real protein)
+
+Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bias toward casein-rich options (cottage cheese, Greek yogurt) for evening rather than a 3rd whey shake. Cooking = nope.`;
+
     const defaultBodyStats = {
       weight: 185, bodyFatPct: 18, goalBodyFatPct: 15,
       height: 71, age: 45, sex: 'male', activityLevel: 'active',
@@ -518,7 +540,7 @@
       trainingMaxesHistory: [], // [{ date, bench, squat, deadlift, source }]
       mealsByDate: {}, // 'YYYY-MM-DD': [{ id, name, items, kcal, protein, carbs, fat, source, loggedAt }]
       oura: null, // see oura/sync.js response shape
-      snackPreferences: '', // free text: foods user likes / avoids, used by /api/topoff
+      snackPreferences: DEFAULT_SNACK_PREFERENCES, // free text: foods user likes / avoids, used by /api/topoff
     };
 
     // Append a new TM snapshot only if it differs from the most recent one.
@@ -762,7 +784,10 @@
             bodyStatsHistory: parsed.bodyStatsHistory || [],
             trainingMaxesHistory: tmHistory,
             oura: parsed.oura || null,
-            snackPreferences: parsed.snackPreferences || '',
+            // Empty string falls back to the seeded default so first-time
+            // users (and existing users with an empty value) get something
+            // useful in the Top Off suggester.
+            snackPreferences: (parsed.snackPreferences && parsed.snackPreferences.trim()) ? parsed.snackPreferences : DEFAULT_SNACK_PREFERENCES,
           };
         }
       } catch (e) {}
@@ -3250,7 +3275,13 @@
           if (status === 'unauthorized') { setSyncStatus('unauthorized'); return; }
           if (status === 'error') { setSyncStatus('error'); return; }
           if (cloud) {
-            setState((prev) => ({ ...prev, ...cloud, activeSession: cloud.activeSession ?? prev.activeSession }));
+            setState((prev) => ({
+            ...prev,
+            ...cloud,
+            activeSession: cloud.activeSession ?? prev.activeSession,
+            // Preserve the seeded default snack preferences if cloud's is empty.
+            snackPreferences: (cloud.snackPreferences && cloud.snackPreferences.trim()) ? cloud.snackPreferences : (prev.snackPreferences || DEFAULT_SNACK_PREFERENCES),
+          }));
             setSyncStatus('synced');
           } else {
             const s = await cloudSync.push(loadState());
@@ -3348,7 +3379,13 @@
         if (status === 'unauthorized') { setSyncStatus('unauthorized'); return; }
         if (status === 'error') { setSyncStatus('error'); return; }
         if (cloud) {
-          setState((prev) => ({ ...prev, ...cloud, activeSession: cloud.activeSession ?? prev.activeSession }));
+          setState((prev) => ({
+            ...prev,
+            ...cloud,
+            activeSession: cloud.activeSession ?? prev.activeSession,
+            // Preserve the seeded default snack preferences if cloud's is empty.
+            snackPreferences: (cloud.snackPreferences && cloud.snackPreferences.trim()) ? cloud.snackPreferences : (prev.snackPreferences || DEFAULT_SNACK_PREFERENCES),
+          }));
           setSyncStatus('synced');
         } else {
           const s = await cloudSync.push(state);
