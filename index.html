@@ -214,7 +214,12 @@
 
     const buildSession = (dayId, state) => {
       const tpl = DAY_TEMPLATES[dayId];
-      const tm = state.trainingMaxes[tpl.mainLift];
+      // Defensive: if a main lift's TM is missing/invalid (e.g. an older
+      // cloud-synced state without the press field), fall back to defaultState.
+      const tmRaw = state.trainingMaxes && state.trainingMaxes[tpl.mainLift];
+      const tm = (Number.isFinite(tmRaw) && tmRaw > 0)
+        ? tmRaw
+        : (defaultState.trainingMaxes[tpl.mainLift] || 100);
       return {
         dayId, name: tpl.name, cycle: state.cycle, week: state.week,
         weekLabel: WEEK_SCHEMES[state.week].label,
@@ -2110,7 +2115,13 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
     // ============================================================
     const SessionView = ({ state, dayId, onComplete, onCancel, onUpdateState }) => {
       const [session, setSession] = useState(() => {
-        if (state.activeSession && state.activeSession.dayId === dayId) return state.activeSession;
+        if (state.activeSession && state.activeSession.dayId === dayId) {
+          // Discard a stale active session if any main set weight is NaN (e.g.
+          // session was built before press TM existed in state). Force rebuild.
+          const hasNaN = (state.activeSession.mainSets || []).some(s => !Number.isFinite(s.weight))
+            || (state.activeSession.supplementary && (state.activeSession.supplementary.sets || []).some(s => !Number.isFinite(s.weight)));
+          if (!hasNaN) return state.activeSession;
+        }
         return buildSession(dayId, state);
       });
 
@@ -3623,6 +3634,22 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
             activeSession: cloud.activeSession ?? prev.activeSession,
             // Preserve the seeded default snack preferences if cloud's is empty.
             snackPreferences: (cloud.snackPreferences && cloud.snackPreferences.trim()) ? cloud.snackPreferences : (prev.snackPreferences || DEFAULT_SNACK_PREFERENCES),
+            // Merge trainingMaxes field-by-field so cloud's older schema
+            // (no press field) doesn't wipe a locally-migrated press TM.
+            trainingMaxes: {
+              ...(prev.trainingMaxes || {}),
+              ...(cloud.trainingMaxes || {}),
+              press: (cloud.trainingMaxes && cloud.trainingMaxes.press) || (prev.trainingMaxes && prev.trainingMaxes.press) || 105,
+            },
+            // Discard active session if it predates the press schema and has
+            // NaN weights (sets where weight isn't a finite number).
+            ...(() => {
+              const as = cloud.activeSession ?? prev.activeSession;
+              if (as && as.mainSets && as.mainSets.some(s => !Number.isFinite(s.weight))) {
+                return { activeSession: null };
+              }
+              return {};
+            })(),
           }));
             setSyncStatus('synced');
           } else {
@@ -3765,6 +3792,18 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
             activeSession: cloud.activeSession ?? prev.activeSession,
             // Preserve the seeded default snack preferences if cloud's is empty.
             snackPreferences: (cloud.snackPreferences && cloud.snackPreferences.trim()) ? cloud.snackPreferences : (prev.snackPreferences || DEFAULT_SNACK_PREFERENCES),
+            trainingMaxes: {
+              ...(prev.trainingMaxes || {}),
+              ...(cloud.trainingMaxes || {}),
+              press: (cloud.trainingMaxes && cloud.trainingMaxes.press) || (prev.trainingMaxes && prev.trainingMaxes.press) || 105,
+            },
+            ...(() => {
+              const as = cloud.activeSession ?? prev.activeSession;
+              if (as && as.mainSets && as.mainSets.some(s => !Number.isFinite(s.weight))) {
+                return { activeSession: null };
+              }
+              return {};
+            })(),
           }));
           setSyncStatus('synced');
         } else {
