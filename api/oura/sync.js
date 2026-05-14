@@ -111,7 +111,10 @@ export default async function handler(req, res) {
   const todayReadiness = R.get(userTodayKey);
   const todayActivity = A.get(userTodayKey);
   const yesterdayActivity = A.get(userYesterdayKey);
-  const yesterdaySleep = S.get(userYesterdayKey);
+  // Oura keys daily_sleep by WAKE day (the day the sleep period ended). So
+  // "last night" — the sleep that ended this morning — is stored under today's
+  // date, not yesterday's.
+  const lastNightSleep = S.get(userTodayKey);
 
   // Sleep "score" applies to the night before that date; Oura keys daily_sleep
   // by wake day. We use yesterday's daily_sleep record as "last night".
@@ -130,7 +133,7 @@ export default async function handler(req, res) {
     // "today so far" calorie balance card on Home.
     active_burn_today: todayActivity ? Math.round(todayActivity.active_calories || 0) : null,
     total_burn_today: todayActivity ? Math.round(todayActivity.total_calories || 0) : null,
-    sleep_score_yesterday: yesterdaySleep ? yesterdaySleep.score : null,
+    sleep_score_yesterday: lastNightSleep ? lastNightSleep.score : null,
     readiness_score_today: todayReadiness ? todayReadiness.score : null,
     days,
   });
