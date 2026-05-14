@@ -166,12 +166,16 @@
     // ============================================================
     const buildMainSets = (tm, week, isVolume) => {
       if (isVolume) {
+        // Boring But Big (BBB) supplementary protocol: 5 sets x 10 reps at 60%
+        // TM. Standard 5/3/1 add-on for bench growth. On deload week, drop to
+        // 3 sets of 5 at 50% so total weekly tonnage backs off.
         const isDeload = week === 4;
         const pct = isDeload ? 0.50 : 0.60;
         const count = isDeload ? 3 : 5;
+        const reps = isDeload ? 5 : 10;
         const w = round5(tm * pct);
         return Array.from({ length: count }, (_, i) => ({
-          id: `main-${i}`, weight: w, targetReps: 5, isAmrap: false, completed: false, actualReps: null
+          id: `main-${i}`, weight: w, targetReps: reps, isAmrap: false, completed: false, actualReps: null
         }));
       }
       return WEEK_SCHEMES[week].sets.map((s, i) => ({
