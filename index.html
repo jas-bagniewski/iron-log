@@ -3835,7 +3835,16 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
         const val = Math.max(45, round5(v));
         const nextTMs = { ...state.trainingMaxes, [lift]: val };
         const tmHistory = appendTMHistory(state.trainingMaxesHistory, nextTMs, 'manual');
-        onUpdateState({ ...state, trainingMaxes: nextTMs, trainingMaxesHistory: tmHistory });
+        // If a cached active session uses this lift, drop it so the next open
+        // rebuilds main + supplementary weights from the new TM.
+        const as = state.activeSession;
+        const sessionUsesLift = as && (as.mainLift === lift || (as.supplementary && as.supplementary.lift === lift));
+        onUpdateState({
+          ...state,
+          trainingMaxes: nextTMs,
+          trainingMaxesHistory: tmHistory,
+          ...(sessionUsesLift ? { activeSession: null } : {}),
+        });
       };
 
       const commitTmDraft = (lift) => {
