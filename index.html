@@ -3829,12 +3829,20 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
       const [secretInput, setSecretInput] = useState(cloudSync.getSecret() || '');
       const [secretSaved, setSecretSaved] = useState(false);
       const [shareCopied, setShareCopied] = useState(false);
+      const [tmDraft, setTmDraft] = useState({});
 
       const updateTM = (lift, v) => {
         const val = Math.max(45, round5(v));
         const nextTMs = { ...state.trainingMaxes, [lift]: val };
         const tmHistory = appendTMHistory(state.trainingMaxesHistory, nextTMs, 'manual');
         onUpdateState({ ...state, trainingMaxes: nextTMs, trainingMaxesHistory: tmHistory });
+      };
+
+      const commitTmDraft = (lift) => {
+        const raw = tmDraft[lift];
+        setTmDraft(prev => { const n = { ...prev }; delete n[lift]; return n; });
+        const parsed = parseInt(raw, 10);
+        if (Number.isFinite(parsed)) updateTM(lift, parsed);
       };
 
       const saveSecret = () => {
@@ -3880,8 +3888,18 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
                   <button onClick={() => updateTM(l.id, state.trainingMaxes[l.id] - 5)} className="w-12 h-12 rounded-lg border border-neutral-800 flex items-center justify-center text-neutral-300 hover:bg-neutral-900">
                     <Minus size={16} />
                   </button>
-                  <div className="flex-1 h-12 bg-neutral-900 border border-neutral-800 rounded-lg flex items-center justify-center font-mono text-xl font-bold text-neutral-50">
-                    {state.trainingMaxes[l.id]} <span className="text-neutral-500 text-sm font-normal ml-1">lb</span>
+                  <div className="relative flex-1">
+                    <input
+                      type="number"
+                      inputMode="numeric"
+                      value={tmDraft[l.id] !== undefined ? tmDraft[l.id] : state.trainingMaxes[l.id]}
+                      onChange={(e) => setTmDraft(prev => ({ ...prev, [l.id]: e.target.value }))}
+                      onFocus={(e) => e.target.select()}
+                      onBlur={() => commitTmDraft(l.id)}
+                      onKeyDown={(e) => { if (e.key === 'Enter') e.target.blur(); }}
+                      className="w-full h-12 bg-neutral-900 border border-neutral-800 focus:border-orange-500 rounded-lg text-center font-mono text-xl font-bold text-neutral-50 outline-none pr-8"
+                    />
+                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-500 text-sm font-mono pointer-events-none">lb</span>
                   </div>
                   <button onClick={() => updateTM(l.id, state.trainingMaxes[l.id] + 5)} className="w-12 h-12 rounded-lg border border-neutral-800 flex items-center justify-center text-neutral-300 hover:bg-neutral-900">
                     <Plus size={16} />
