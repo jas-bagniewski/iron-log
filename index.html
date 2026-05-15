@@ -1838,7 +1838,11 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
           ) : (
             <div className="text-[15px] text-neutral-400">Log {3 - bal.cumulative.days} more day{3 - bal.cumulative.days === 1 ? '' : 's'} to see 7-day pace</div>
           )}
-          <div className="text-[11px] text-neutral-600 font-mono mt-1.5">7d cumulative · goal {goalText}</div>
+          <div className="text-[11px] text-neutral-600 font-mono mt-1.5">
+            {bal.cumulative.days >= 3
+              ? `vs target ${fmt(proratedGoal)} · ${bal.cumulative.days}d × ${goalText}`
+              : `7d cumulative · goal ${goalText}`}
+          </div>
         </div>
       );
       return (
