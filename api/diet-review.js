@@ -9,12 +9,14 @@ const SYSTEM_PROMPT = `You are a nutrition coach reviewing 7 days of logged meal
 
 CRITICAL ARITHMETIC RULE: All numerical facts (daily totals, averages, percentages, deltas vs target) are PRE-COMPUTED and given to you. NEVER do your own arithmetic - never add up meal calories, never calculate percentages, never sum protein. Use ONLY the numbers in the "PRE-COMPUTED FACTS" section verbatim. If you need a number that isn't there, say "based on the totals above" and reference them rather than computing.
 
-Your job is to read the qualitative content (meal names, items lists, timestamps) and produce:
-1. PROTEIN narrative (using pre-computed protein hit counts)
-2. CALORIE PATTERN narrative (consistency vs swings, using pre-computed daily totals)
-3. FOOD GROUP BALANCE — VEG, FRUIT, LEAN PROTEIN, WHOLE GRAINS, DAIRY, PROCESSED/TREATS, ALCOHOL. Tally servings by reading meal names and items lists.
-4. DIVERSITY — repeating same meals vs variety. Look at meal names.
-5. TIMING — late-night eating, skipped breakfasts (if timestamps suggest).
+Your job is to read the QUALITATIVE content (meal names, items lists, timestamps) and produce findings on:
+1. FOOD GROUP BALANCE — vegetables, fruit, lean protein, whole grains, dairy, processed/treats, alcohol. Tally servings by reading meal names and items lists. Flag absences.
+2. DIVERSITY — same meals repeating vs variety. Look at meal names.
+3. TIMING — late-night eating after 10pm, skipped breakfast (no meal before 10am), >5h gaps between meals.
+
+Do NOT flag day-to-day calorie variation or "wild swings". The app's pace-adjustment system intentionally varies each day's calorie target to balance the trailing 7-day total — a 500-cal swing across days is BY DESIGN. Macro totals and protein hit counts are surfaced separately in the deterministic stats panel; don't repeat them. Focus your narrative on food groups, diversity, timing, and protein quality.
+
+Timestamps are in the user's LOCAL time, formatted "h:MM AM/PM".
 
 BREVITY RULES (strict):
 - verdict: max 10 words
@@ -101,7 +103,15 @@ export default async function handler(req, res) {
   const targets = body && body.targets;
   const weight = body && body.weight;
   const mode = (body && body.mode) || 'cut';
+  const tz = (body && body.tz) || 'UTC';
   if (!Array.isArray(days) || !targets) return res.status(400).json({ error: 'days and targets required' });
+
+  const fmtTime = (iso) => {
+    if (!iso) return '';
+    try {
+      return new Date(iso).toLocaleTimeString('en-US', { timeZone: tz, hour: 'numeric', minute: '2-digit', hour12: true });
+    } catch { return ''; }
+  };
 
   const stats = computeStats(days, targets);
 
@@ -128,9 +138,10 @@ ${stats.per_day.map(d => `  ${d.date}: ${d.kcal} kcal (${d.kcal_vs_target_pct >=
 RAW MEAL LOG (use for qualitative analysis only — food groups, timing, diversity)
 ==================
 ${days.map(d => {
-  const meals = (d.meals || []).map(m =>
-    `  - ${m.name}${m.source ? ' [' + m.source + ']' : ''}${m.loggedAt ? ' @ ' + new Date(m.loggedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : ''}${m.items && m.items.length > 0 ? ' — items: ' + m.items.map(i => i.food).join(', ') : ''}`
-  ).join('\n') || '  (no meals logged)';
+  const meals = (d.meals || []).map(m => {
+    const t = fmtTime(m.loggedAt);
+    return `  - ${m.name}${m.source ? ' [' + m.source + ']' : ''}${t ? ' @ ' + t : ''}${m.items && m.items.length > 0 ? ' — items: ' + m.items.map(i => i.food).join(', ') : ''}`;
+  }).join('\n') || '  (no meals logged)';
   return `${d.date}:\n${meals}`;
 }).join('\n\n')}
 

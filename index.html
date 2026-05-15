@@ -2493,10 +2493,16 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
           const targets = computeMacroTargets(state.bodyStats, state.oura, computeWeeklyPace(state), computeBodyDiag(state));
           const mode = targets.mode || 'maintain';
           const weight = state.bodyStats?.weight;
+          // Pass user's local timezone so the API can format meal timestamps
+          // in their actual clock time (vs the server's UTC).
+          const tz = (() => {
+            try { return Intl.DateTimeFormat().resolvedOptions().timeZone; }
+            catch { return null; }
+          })();
           const r = await fetch('/api/diet-review', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', ...(secret ? { 'x-sync-secret': secret } : {}) },
-            body: JSON.stringify({ days, targets, weight, mode }),
+            body: JSON.stringify({ days, targets, weight, mode, tz }),
           });
           if (!r.ok) {
             const j = await r.json().catch(() => ({}));
