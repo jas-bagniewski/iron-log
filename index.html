@@ -1779,15 +1779,25 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
         };
       };
       const todayExpected = dailyGoal * (bal.today.fractionOfDay || 1);
-      const todayZone = dayZone(bal.today.net, todayExpected);
+      // If user hasn't logged any meals today yet, don't grade them - it's
+      // just an unlogged day, not under-eating.
+      const todayZone = bal.today.intake === 0
+        ? { color: 'text-neutral-400', label: 'Nothing logged yet' }
+        : dayZone(bal.today.net, todayExpected);
       const yesterdayZone = bal.yesterday.hasIntake ? dayZone(bal.yesterday.net, dailyGoal) : { color: 'text-neutral-500', label: null };
       // Goal-aware coloring for the 7-day cumulative number.
-      // "Goal" = weeklyGoal cal. ±700 cal/week (~100/d) = green, ±2100 = orange, beyond = red.
+      // Goal is PRORATED by days actually logged - otherwise the cumulative
+      // looks deficient just because you haven't logged every day yet.
+      // Tolerances scale with the logged-day count too (~100/d green,
+      // ~300/d orange beyond which is red).
+      const proratedGoal = weeklyGoal * (bal.cumulative.days || 0) / 7;
       const goalZone = (() => {
-        const distance = bal.cumulative.net - weeklyGoal;
+        const distance = bal.cumulative.net - proratedGoal;
         const abs = Math.abs(distance);
-        if (abs <= 700) return { color: 'text-green-400', label: 'On target', dot: 'bg-green-400' };
-        if (abs <= 2100) return { color: 'text-orange-300', label: distance < 0 ? 'Too aggressive' : (dailyGoal < 0 ? 'Not enough deficit' : (dailyGoal > 0 ? 'Not enough surplus' : 'Off maintenance')), dot: 'bg-orange-300' };
+        const greenTol = 100 * (bal.cumulative.days || 7);
+        const orangeTol = 300 * (bal.cumulative.days || 7);
+        if (abs <= greenTol) return { color: 'text-green-400', label: 'On target', dot: 'bg-green-400' };
+        if (abs <= orangeTol) return { color: 'text-orange-300', label: distance < 0 ? 'Too aggressive' : (dailyGoal < 0 ? 'Not enough deficit' : (dailyGoal > 0 ? 'Not enough surplus' : 'Off maintenance')), dot: 'bg-orange-300' };
         return { color: 'text-red-400', label: distance < 0 ? 'Way too aggressive' : (dailyGoal < 0 ? 'Way over goal' : (dailyGoal > 0 ? 'Way under goal' : 'Off maintenance')), dot: 'bg-red-400' };
       })();
       const ouraConnected = !!(state.oura && state.oura.last_sync_at);
@@ -1854,7 +1864,6 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
             const pace = computeWeeklyPace(state);
             const targetsWithPace = computeMacroTargets(state.bodyStats, state.oura, pace, computeBodyDiag(state));
             const adj = targetsWithPace.adjustment;
-            const distance = bal.cumulative.net - weeklyGoal;
             // adj > 0 = eat more today (you were too aggressive). adj < 0 = eat less (not deficit enough).
             const onPace = Math.abs(adj) < 50;
             return (
