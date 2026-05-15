@@ -3362,13 +3362,13 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
     // ============================================================
     // IRON LOG VIEW (Train / Progress / History sub-tabs)
     // ============================================================
-    const IronLogView = ({ state, onStart, onSettings }) => {
+    const IronLogView = ({ state, onStart, onSettings, onUpdateState }) => {
       const [sub, setSub] = useState('train'); // train | progress | history
       const [historyFilter, setHistoryFilter] = useState('all');
       const [selected, setSelected] = useState(null);
 
       if (selected) {
-        return <SessionDetailView session={selected} onBack={() => setSelected(null)} />;
+        return <SessionDetailView session={selected} onBack={() => setSelected(null)} state={state} onUpdateState={onUpdateState} />;
       }
 
       const history = state.history || [];
@@ -3481,7 +3481,43 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
     // ============================================================
     // SESSION DETAIL VIEW (drill-down from History)
     // ============================================================
-    const SessionDetailView = ({ session, onBack }) => {
+    const SessionDetailView = ({ session: initialSession, onBack, state, onUpdateState }) => {
+      // Re-derive from state.history so external edits trigger a re-render.
+      const session = (state && state.history && state.history.find(s => s.completedAt === initialSession.completedAt)) || initialSession;
+      const canEdit = !!onUpdateState && !!state && Array.isArray(state.history);
+      const [drafts, setDrafts] = useState({});
+      const setDraft = (key, val) => setDrafts(prev => ({ ...prev, [key]: val }));
+      const clearDraft = (key) => setDrafts(prev => { const n = { ...prev }; delete n[key]; return n; });
+      const commitAccessoryWeight = (accId) => {
+        const key = `acc:${accId}:weight`;
+        const raw = drafts[key];
+        clearDraft(key);
+        if (!canEdit) return;
+        const parsed = parseFloat(raw);
+        if (!Number.isFinite(parsed) || parsed < 0) return;
+        const next = state.history.map(s => s.completedAt !== session.completedAt ? s : ({
+          ...s,
+          accessories: (s.accessories || []).map(a => a.id !== accId ? a : ({ ...a, weight: Math.round(parsed) })),
+        }));
+        onUpdateState({ ...state, history: next });
+      };
+      const commitAccessoryReps = (accId, idx) => {
+        const key = `acc:${accId}:set:${idx}`;
+        const raw = drafts[key];
+        clearDraft(key);
+        if (!canEdit) return;
+        const parsed = parseInt(raw, 10);
+        if (!Number.isFinite(parsed) || parsed < 0) return;
+        const next = state.history.map(s => s.completedAt !== session.completedAt ? s : ({
+          ...s,
+          accessories: (s.accessories || []).map(a => a.id !== accId ? a : ({
+            ...a,
+            setData: (a.setData || []).map((set, i) => i !== idx ? set : ({ ...set, reps: parsed, completed: parsed > 0 })),
+          })),
+        }));
+        onUpdateState({ ...state, history: next });
+      };
+
       const amrap = session.mainSets?.find(s => s.isAmrap && s.actualReps);
       const e1RM = amrap ? estimate1RM(amrap.weight, amrap.actualReps) : null;
       const completedMain = session.mainSets?.filter(s => s.completed) || [];
@@ -3560,26 +3596,59 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
                 {session.accessories.map(acc => {
                   const sets = (acc.setData || []).filter(s => s.completed);
                   const unit = acc.isTimed ? 'sec' : 'reps';
+                  const wKey = `acc:${acc.id}:weight`;
                   return (
                     <div key={acc.id} className="bg-neutral-950 border border-neutral-800 rounded-xl p-4">
                       <div className="flex items-baseline justify-between mb-2">
                         <div className="font-bold text-neutral-50">{acc.name}</div>
                         {!acc.isBodyweight && !acc.isTimed && (
-                          <div className="font-mono text-sm text-neutral-400">{acc.weight}<span className="text-[10px] text-neutral-500 ml-0.5">lb</span></div>
+                          canEdit ? (
+                            <div className="flex items-baseline">
+                              <input
+                                type="number"
+                                inputMode="numeric"
+                                value={drafts[wKey] !== undefined ? drafts[wKey] : acc.weight}
+                                onChange={(e) => setDraft(wKey, e.target.value)}
+                                onFocus={(e) => e.target.select()}
+                                onBlur={() => commitAccessoryWeight(acc.id)}
+                                onKeyDown={(e) => { if (e.key === 'Enter') e.target.blur(); }}
+                                className="w-14 bg-transparent border-b border-neutral-700 focus:border-orange-500 text-sm font-mono text-neutral-200 text-right outline-none p-0"
+                              />
+                              <span className="text-[10px] text-neutral-500 ml-0.5">lb</span>
+                            </div>
+                          ) : (
+                            <div className="font-mono text-sm text-neutral-400">{acc.weight}<span className="text-[10px] text-neutral-500 ml-0.5">lb</span></div>
+                          )
                         )}
                         {acc.isBodyweight && <div className="text-[10px] uppercase tracking-wider text-neutral-500 font-mono">bodyweight</div>}
                       </div>
-                      {sets.length === 0 ? (
+                      {sets.length === 0 && !canEdit ? (
                         <div className="text-xs text-neutral-600 italic">no sets logged</div>
                       ) : (
                         <div className="grid grid-cols-3 gap-2">
-                          {(acc.setData || []).map((s, i) => (
-                            <div key={i} className={`text-center py-2 rounded border ${s.completed ? 'bg-orange-500/5 border-orange-500/30 text-orange-200' : 'bg-neutral-900 border-neutral-800 text-neutral-600'}`}>
-                              <div className="text-[10px] uppercase tracking-wider">Set {i + 1}</div>
-                              <div className="font-mono text-base font-bold leading-tight">{s.completed ? s.reps : '—'}</div>
-                              <div className="text-[9px] uppercase tracking-wider opacity-70">{unit}</div>
-                            </div>
-                          ))}
+                          {(acc.setData || []).map((s, i) => {
+                            const rKey = `acc:${acc.id}:set:${i}`;
+                            return (
+                              <div key={i} className={`text-center py-2 rounded border ${s.completed ? 'bg-orange-500/5 border-orange-500/30 text-orange-200' : 'bg-neutral-900 border-neutral-800 text-neutral-600'}`}>
+                                <div className="text-[10px] uppercase tracking-wider">Set {i + 1}</div>
+                                {canEdit ? (
+                                  <input
+                                    type="number"
+                                    inputMode="numeric"
+                                    value={drafts[rKey] !== undefined ? drafts[rKey] : (s.reps != null ? s.reps : '')}
+                                    onChange={(e) => setDraft(rKey, e.target.value)}
+                                    onFocus={(e) => e.target.select()}
+                                    onBlur={() => commitAccessoryReps(acc.id, i)}
+                                    onKeyDown={(e) => { if (e.key === 'Enter') e.target.blur(); }}
+                                    className="w-full bg-transparent text-center font-mono text-base font-bold leading-tight outline-none border-b border-transparent focus:border-orange-500 p-0"
+                                  />
+                                ) : (
+                                  <div className="font-mono text-base font-bold leading-tight">{s.completed ? s.reps : '—'}</div>
+                                )}
+                                <div className="text-[9px] uppercase tracking-wider opacity-70">{unit}</div>
+                              </div>
+                            );
+                          })}
                         </div>
                       )}
                     </div>
@@ -4280,7 +4349,7 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
       return (
         <div className="min-h-screen bg-black text-neutral-100">
           {view === 'home' && <HomeView state={state} syncStatus={syncStatus} onSettings={() => setView('settings')} onDiet={() => setView('diet')} />}
-          {view === 'log' && <IronLogView state={state} onStart={handleStart} onSettings={() => setView('settings')} />}
+          {view === 'log' && <IronLogView state={state} onStart={handleStart} onSettings={() => setView('settings')} onUpdateState={setState} />}
           {view === 'diet' && <DietView state={state} onBack={() => setView('home')} onUpdateState={setState} />}
           {view === 'session' && activeDayId && <SessionView state={state} dayId={activeDayId} onComplete={handleComplete} onCancel={handleCancel} onUpdateState={setState} />}
           {view === 'complete' && completionSummary && <SessionCompleteView summary={completionSummary} onDone={handleSummaryDone} />}
