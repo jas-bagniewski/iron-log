@@ -1004,11 +1004,20 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
     // ============================================================
     // MAIN SET ROW
     // ============================================================
-    const MainSetRow = ({ set, idx, onToggle, onAmrap }) => {
+    const MainSetRow = ({ set, idx, onToggle, onAmrap, onChangeWeight }) => {
       const [showPrompt, setShowPrompt] = useState(false);
+      const [weightDraft, setWeightDraft] = useState(null);
       const handleClick = () => {
         if (set.isAmrap && !set.completed) setShowPrompt(true);
         else onToggle();
+      };
+      const commitWeight = () => {
+        const raw = weightDraft;
+        setWeightDraft(null);
+        const parsed = parseInt(raw, 10);
+        if (Number.isFinite(parsed) && parsed > 0 && onChangeWeight) {
+          onChangeWeight(set.id, Math.max(0, round5(parsed)));
+        }
       };
       return (
         <>
@@ -1024,8 +1033,23 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
                 {set.completed ? <Check size={16} strokeWidth={3} /> : idx + 1}
               </div>
               <div>
-                <div className="font-mono text-2xl font-bold text-neutral-50 leading-none">
-                  {set.weight}<span className="text-neutral-500 text-base font-normal ml-1">lb</span>
+                <div className="font-mono text-2xl font-bold text-neutral-50 leading-none flex items-baseline">
+                  {onChangeWeight ? (
+                    <input
+                      type="number"
+                      inputMode="numeric"
+                      value={weightDraft !== null ? weightDraft : set.weight}
+                      onChange={(e) => setWeightDraft(e.target.value)}
+                      onFocus={(e) => { e.target.select(); }}
+                      onBlur={commitWeight}
+                      onClick={(e) => e.stopPropagation()}
+                      onKeyDown={(e) => { if (e.key === 'Enter') e.target.blur(); }}
+                      className="w-20 bg-transparent border-b border-neutral-700 focus:border-orange-500 text-2xl font-mono font-bold text-neutral-50 text-center outline-none p-0"
+                    />
+                  ) : (
+                    <span>{set.weight}</span>
+                  )}
+                  <span className="text-neutral-500 text-base font-normal ml-1">lb</span>
                 </div>
                 <div className="text-xs uppercase tracking-wider text-neutral-500 mt-1">
                   {set.isAmrap
@@ -2255,6 +2279,8 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
 
       const toggleMain = (id) => setSession(p => ({ ...p, mainSets: p.mainSets.map(s => s.id === id ? { ...s, completed: !s.completed } : s) }));
       const logAmrap = (id, reps) => setSession(p => ({ ...p, mainSets: p.mainSets.map(s => s.id === id ? { ...s, completed: true, actualReps: reps } : s) }));
+      const updateMainWeight = (id, weight) => setSession(p => ({ ...p, mainSets: p.mainSets.map(s => s.id === id ? { ...s, weight } : s) }));
+      const updateSupWeight = (id, weight) => setSession(p => p.supplementary ? ({ ...p, supplementary: { ...p.supplementary, sets: p.supplementary.sets.map(s => s.id === id ? { ...s, weight } : s) } }) : p);
       const updateAcc = (acc) => setSession(p => ({ ...p, accessories: p.accessories.map(a => a.id === acc.id ? acc : a) }));
       const toggleSup = (id) => setSession(p => p.supplementary ? ({ ...p, supplementary: { ...p.supplementary, sets: p.supplementary.sets.map(s => s.id === id ? { ...s, completed: !s.completed } : s) } }) : p);
 
@@ -2305,7 +2331,8 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
               {session.mainSets.map((set, i) => (
                 <MainSetRow key={set.id} set={set} idx={i}
                   onToggle={() => toggleMain(set.id)}
-                  onAmrap={(reps) => logAmrap(set.id, reps)} />
+                  onAmrap={(reps) => logAmrap(set.id, reps)}
+                  onChangeWeight={updateMainWeight} />
               ))}
             </div>
           </div>
@@ -2321,7 +2348,8 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
                 {session.supplementary.sets.map((set, i) => (
                   <MainSetRow key={set.id} set={set} idx={i}
                     onToggle={() => toggleSup(set.id)}
-                    onAmrap={() => {}} />
+                    onAmrap={() => {}}
+                    onChangeWeight={updateSupWeight} />
                 ))}
               </div>
             </div>
