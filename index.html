@@ -1778,12 +1778,28 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
             : (dailyGoal < 0 ? 'Way over goal' : 'Way over'),
         };
       };
-      const todayExpected = dailyGoal * (bal.today.fractionOfDay || 1);
-      // If user hasn't logged any meals today yet, don't grade them - it's
-      // just an unlogged day, not under-eating.
+      // Today's zone answers "speed up or slow down?" by comparing intake
+      // (not net) to the intake pace needed to land on the daily kcal target.
+      // Net-based grading made early-day look 'too aggressive' even when
+      // tracking fine for end-of-day.
+      const expectedIntakeNow = targets.kcal * (bal.today.fractionOfDay || 1);
+      const intakeOver = bal.today.intake - expectedIntakeNow;
       const todayZone = bal.today.intake === 0
         ? { color: 'text-neutral-400', label: 'Nothing logged yet' }
-        : dayZone(bal.today.net, todayExpected);
+        : (() => {
+            const abs = Math.abs(intakeOver);
+            if (abs < 200) return { color: 'text-green-400', label: 'On pace' };
+            if (intakeOver > 0) {
+              // Ahead on intake -> risk overshooting daily target
+              return abs < 500
+                ? { color: 'text-orange-300', label: 'Slow down' }
+                : { color: 'text-red-400', label: 'Over pace' };
+            }
+            // Behind on intake -> room to spare (deeper deficit is OK in cut)
+            return abs < 500
+              ? { color: 'text-blue-300', label: 'Room to spare' }
+              : { color: 'text-blue-400', label: 'Way under pace' };
+          })();
       const yesterdayZone = bal.yesterday.hasIntake ? dayZone(bal.yesterday.net, dailyGoal) : { color: 'text-neutral-500', label: null };
       // Goal-aware coloring for the 7-day cumulative number.
       // Goal is PRORATED by days actually logged - otherwise the cumulative
