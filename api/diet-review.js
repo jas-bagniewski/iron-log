@@ -9,14 +9,16 @@ const SYSTEM_PROMPT = `You are a nutrition coach reviewing 7 days of logged meal
 
 CRITICAL ARITHMETIC RULE: All numerical facts (daily totals, averages, percentages, deltas vs target) are PRE-COMPUTED and given to you. NEVER do your own arithmetic - never add up meal calories, never calculate percentages, never sum protein. Use ONLY the numbers in the "PRE-COMPUTED FACTS" section verbatim. If you need a number that isn't there, say "based on the totals above" and reference them rather than computing.
 
-Your job is to read the QUALITATIVE content (meal names, items lists, timestamps) and produce findings on:
+Your job is to read the QUALITATIVE content (meal names + items lists) and produce findings on:
 1. FOOD GROUP BALANCE — vegetables, fruit, lean protein, whole grains, dairy, processed/treats, alcohol. Tally servings by reading meal names and items lists. Flag absences.
 2. DIVERSITY — same meals repeating vs variety. Look at meal names.
-3. TIMING — late-night eating after 10pm, skipped breakfast (no meal before 10am), >5h gaps between meals.
+3. TIMING — ONLY if pre-computed timing facts show a real issue: meals_after_10pm > 2 OR meals_before_6am > 0 OR earliest_hour > 11 (skipped breakfast). Do NOT count or interpret meal times yourself.
 
-Do NOT flag day-to-day calorie variation or "wild swings". The app's pace-adjustment system intentionally varies each day's calorie target to balance the trailing 7-day total — a 500-cal swing across days is BY DESIGN. Macro totals and protein hit counts are surfaced separately in the deterministic stats panel; don't repeat them. Focus your narrative on food groups, diversity, timing, and protein quality.
-
-Timestamps are in the user's LOCAL time, formatted "h:MM AM/PM".
+DO NOT:
+- Flag day-to-day calorie variation (pace adjustment is by design).
+- Flag "unlogged days" or "consecutive days missing" — the meal log only includes days the user actually tracked. Days outside that are not present in your context.
+- Compute meal times, sum calories, or count anything. Use the pre-computed facts.
+- Repeat macro totals or protein hit counts in findings (they're shown in the stats panel above the findings).
 
 BREVITY RULES (strict):
 - verdict: max 10 words
@@ -46,7 +48,15 @@ Output VALID JSON ONLY, no markdown:
 
 // Server-side stats: pre-computed so the AI doesn't have to (and can't) get
 // the arithmetic wrong. Returned to the client as authoritative.
-function computeStats(days, targets) {
+function computeStats(days, targets, tz) {
+  const localHour = (iso) => {
+    if (!iso) return null;
+    try {
+      const h = new Date(iso).toLocaleString('en-US', { timeZone: tz || 'UTC', hour: 'numeric', hour12: false });
+      const n = parseInt(h, 10);
+      return Number.isFinite(n) ? n : null;
+    } catch { return null; }
+  };
   const perDay = (days || []).map((d) => {
     const meals = d.meals || [];
     const totals = meals.reduce((acc, m) => ({
@@ -75,6 +85,19 @@ function computeStats(days, targets) {
   const proteinHits = logged.filter((d) => d.protein_hit).length;
   const kcalMin = logged.length ? Math.min(...logged.map((d) => d.kcal)) : 0;
   const kcalMax = logged.length ? Math.max(...logged.map((d) => d.kcal)) : 0;
+
+  // Timing facts: count meals by local hour-of-day across all logged meals.
+  // Pre-computed so the AI doesn't have to parse timestamps (which it does
+  // unreliably with many meals).
+  const allMealsWithTime = logged.flatMap(d => (days.find(x => x.date === d.date)?.meals || []).map(m => ({
+    ...m,
+    hour: localHour(m.loggedAt),
+  }))).filter(m => m.hour != null);
+  const earliest = allMealsWithTime.length ? Math.min(...allMealsWithTime.map(m => m.hour)) : null;
+  const latest = allMealsWithTime.length ? Math.max(...allMealsWithTime.map(m => m.hour)) : null;
+  const before6am = allMealsWithTime.filter(m => m.hour < 6).length;
+  const after10pm = allMealsWithTime.filter(m => m.hour >= 22).length;
+
   return {
     days_logged: logged.length,
     total_days_requested: perDay.length,
@@ -84,6 +107,13 @@ function computeStats(days, targets) {
     avg_fat: avgFat,
     protein_hit_days: proteinHits,
     kcal_range: { min: kcalMin, max: kcalMax, swing: kcalMax - kcalMin },
+    timing: {
+      earliest_hour: earliest,
+      latest_hour: latest,
+      meals_before_6am: before6am,
+      meals_after_10pm: after10pm,
+      total_meals_with_time: allMealsWithTime.length,
+    },
     per_day: perDay,
   };
 }
@@ -113,7 +143,14 @@ export default async function handler(req, res) {
     } catch { return ''; }
   };
 
-  const stats = computeStats(days, targets);
+  const stats = computeStats(days, targets, tz);
+
+  // Only send days that actually have meals logged. Unlogged days are simply
+  // days the user wasn't using the app yet - not a dietary issue.
+  const loggedDays = days.filter(d => (d.meals || []).length > 0);
+
+  const t = stats.timing;
+  const fmtHour = (h) => h == null ? '?' : (h % 12 === 0 ? '12' : h % 12) + (h < 12 ? ' AM' : ' PM');
 
   const userMsg = `==================
 PRE-COMPUTED FACTS (use verbatim; do not recompute)
@@ -121,33 +158,39 @@ PRE-COMPUTED FACTS (use verbatim; do not recompute)
 Daily targets: ${targets.kcal} kcal, ${targets.protein}g protein, ${targets.carbs}g carbs, ${targets.fat}g fat
 Body weight: ${weight || '?'} lb
 Goal mode: ${mode}
+User local timezone: ${tz}
 
-Days logged: ${stats.days_logged} of ${stats.total_days_requested}
-Avg per day (across logged days only):
+Days logged: ${stats.days_logged}
+Avg per day:
   - ${stats.avg_kcal} kcal
   - ${stats.avg_protein}g protein
   - ${stats.avg_carbs}g carbs
   - ${stats.avg_fat}g fat
 Days hit protein target (>=95% of ${targets.protein}g): ${stats.protein_hit_days} of ${stats.days_logged}
-Calorie swing across days: ${stats.kcal_range.min} - ${stats.kcal_range.max} (${stats.kcal_range.swing} range)
 
-Per-day totals:
-${stats.per_day.map(d => `  ${d.date}: ${d.kcal} kcal (${d.kcal_vs_target_pct >= 0 ? '+' : ''}${d.kcal_vs_target_pct}% vs target), ${d.protein}g P${d.protein_hit ? ' ✓' : ' (missed)'}, ${d.carbs}g C, ${d.fat}g F, ${d.mealCount} meals`).join('\n')}
+Per-logged-day totals:
+${stats.per_day.filter(d => d.mealCount > 0).map(d => `  ${d.date}: ${d.kcal} kcal, ${d.protein}g P${d.protein_hit ? ' ✓' : ' (missed)'}, ${d.carbs}g C, ${d.fat}g F, ${d.mealCount} meals`).join('\n')}
+
+TIMING FACTS (local time, pre-computed - DO NOT compute time yourself):
+  - Total meals with timestamps: ${t.total_meals_with_time}
+  - Earliest meal hour: ${fmtHour(t.earliest_hour)}
+  - Latest meal hour: ${fmtHour(t.latest_hour)}
+  - Meals before 6 AM: ${t.meals_before_6am}
+  - Meals after 10 PM: ${t.meals_after_10pm}
 
 ==================
-RAW MEAL LOG (use for qualitative analysis only — food groups, timing, diversity)
+RAW MEAL LOG (for QUALITATIVE analysis only — food groups, diversity. Do NOT count, sum, or interpret times.)
 ==================
-${days.map(d => {
+${loggedDays.map(d => {
   const meals = (d.meals || []).map(m => {
-    const t = fmtTime(m.loggedAt);
-    return `  - ${m.name}${m.source ? ' [' + m.source + ']' : ''}${t ? ' @ ' + t : ''}${m.items && m.items.length > 0 ? ' — items: ' + m.items.map(i => i.food).join(', ') : ''}`;
-  }).join('\n') || '  (no meals logged)';
+    return `  - ${m.name}${m.items && m.items.length > 0 ? ' — items: ' + m.items.map(i => i.food).join(', ') : ''}`;
+  }).join('\n');
   return `${d.date}:\n${meals}`;
 }).join('\n\n')}
 
 ==================
 
-Analyze the qualitative patterns (food groups, diversity, timing). Use ONLY the pre-computed numbers above when citing macros, percentages, totals, or averages. Return JSON per the schema.`;
+Use ONLY the pre-computed numbers above for any quantitative claim (macros, percentages, totals, meal counts, timing). The raw meal log is for reading meal NAMES and ITEMS to assess food groups and diversity. Return JSON per the schema.`;
 
   try {
     const r = await fetch('https://api.anthropic.com/v1/messages', {
