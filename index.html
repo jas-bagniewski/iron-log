@@ -2575,6 +2575,40 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
                     </div>
                   )}
 
+                  {result.per_day && result.per_day.length > 0 && (
+                    <details className="bg-neutral-900 border border-neutral-800 rounded-lg">
+                      <summary className="cursor-pointer list-none px-3 py-2 flex items-center justify-between">
+                        <span className="text-[10px] uppercase tracking-[0.2em] text-neutral-500 font-mono">PER-DAY BREAKDOWN</span>
+                        <span className="text-[10px] text-neutral-600 font-mono">tap to expand</span>
+                      </summary>
+                      <div className="px-3 pb-3 space-y-1">
+                        {result.per_day.map((d, i) => {
+                          const date = new Date(d.date + 'T12:00:00');
+                          const label = date.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+                          if (d.mealCount === 0) {
+                            return (
+                              <div key={i} className="flex items-center justify-between text-[11px] py-1 border-t border-neutral-800/50">
+                                <div className="text-neutral-500 font-mono">{label}</div>
+                                <div className="text-neutral-600 italic">no meals logged</div>
+                              </div>
+                            );
+                          }
+                          const pctColor = Math.abs(d.kcal_vs_target_pct) <= 10 ? 'text-green-400' : Math.abs(d.kcal_vs_target_pct) <= 25 ? 'text-orange-300' : 'text-red-400';
+                          return (
+                            <div key={i} className="flex items-center justify-between text-[11px] py-1 border-t border-neutral-800/50 gap-2">
+                              <div className="text-neutral-300 font-mono shrink-0">{label}</div>
+                              <div className="text-right font-mono text-neutral-100">
+                                {d.kcal} <span className={pctColor}>({d.kcal_vs_target_pct >= 0 ? '+' : ''}{d.kcal_vs_target_pct}%)</span>
+                                <span className="text-neutral-500"> · </span>
+                                <span className={d.protein_hit ? 'text-green-400' : 'text-orange-300'}>{d.protein}g P</span>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </details>
+                  )}
+
                   {result.findings && result.findings.length > 0 && (
                     <div>
                       <div className="text-[10px] uppercase tracking-[0.2em] text-neutral-500 font-mono mb-2">FINDINGS</div>
