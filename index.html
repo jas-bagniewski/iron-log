@@ -3510,6 +3510,12 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
         const newEntry = recomputeAccLog(nextHistory, accId);
         const nextState = { ...state, history: nextHistory };
         if (newEntry) nextState.accessoryLog = { ...(state.accessoryLog || {}), [accId]: newEntry };
+        // If there's a cached active session that includes this accessory, drop
+        // it so the next open rebuilds the suggested weight from the fresh log.
+        const as = state.activeSession;
+        if (as && (as.accessories || []).some(a => a.id === accId)) {
+          nextState.activeSession = null;
+        }
         onUpdateState(nextState);
       };
       const commitAccessoryWeight = (accId) => {
