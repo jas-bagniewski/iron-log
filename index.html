@@ -1825,20 +1825,33 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
               : { color: 'text-blue-400', label: 'Way under pace' };
           })();
       const yesterdayZone = bal.yesterday.hasIntake ? dayZone(bal.yesterday.net, dailyGoal) : { color: 'text-neutral-500', label: null };
-      // Goal-aware coloring for the 7-day cumulative number.
-      // Goal is PRORATED by days actually logged - otherwise the cumulative
-      // looks deficient just because you haven't logged every day yet.
-      // Tolerances scale with the logged-day count too (~100/d green,
-      // ~300/d orange beyond which is red).
+      // Single source of truth for the weekly verdict: average daily delta
+      // vs the daily goal. Same lens the course correction uses, so the
+      // headline label and the course-correction recommendation always agree.
+      // Falls back to cumulative-net/days when pace data is sparse.
+      const pace = computeWeeklyPace(state);
+      const avgDailyDelta = pace.hasEnoughData
+        ? pace.actualDailyDelta
+        : (bal.cumulative.days > 0 ? Math.round(bal.cumulative.net / bal.cumulative.days) : null);
+      const excessPerDay = avgDailyDelta != null ? avgDailyDelta - dailyGoal : 0;
       const proratedGoal = weeklyGoal * (bal.cumulative.days || 0) / 7;
+      // Thresholds match the course-correction's adjustment formula
+      // (|adj| < 50 means |excess| < 150 cal/d), so green here implies green
+      // there. Past 300 cal/d off goal is the red band.
       const goalZone = (() => {
-        const distance = bal.cumulative.net - proratedGoal;
-        const abs = Math.abs(distance);
-        const greenTol = 100 * (bal.cumulative.days || 7);
-        const orangeTol = 300 * (bal.cumulative.days || 7);
-        if (abs <= greenTol) return { color: 'text-green-400', label: 'On target', dot: 'bg-green-400' };
-        if (abs <= orangeTol) return { color: 'text-orange-300', label: distance < 0 ? 'Too aggressive' : (dailyGoal < 0 ? 'Not enough deficit' : (dailyGoal > 0 ? 'Not enough surplus' : 'Off maintenance')), dot: 'bg-orange-300' };
-        return { color: 'text-red-400', label: distance < 0 ? 'Way too aggressive' : (dailyGoal < 0 ? 'Way over goal' : (dailyGoal > 0 ? 'Way under goal' : 'Off maintenance')), dot: 'bg-red-400' };
+        if (avgDailyDelta == null) return { color: 'text-neutral-500', label: null, dot: 'bg-neutral-700' };
+        const abs = Math.abs(excessPerDay);
+        if (abs <= 150) return { color: 'text-green-400', label: 'On pace', dot: 'bg-green-400' };
+        if (abs <= 300) return {
+          color: 'text-orange-300',
+          label: excessPerDay < 0 ? 'Too aggressive' : (dailyGoal < 0 ? 'Not enough deficit' : (dailyGoal > 0 ? 'Not enough surplus' : 'Off maintenance')),
+          dot: 'bg-orange-300',
+        };
+        return {
+          color: 'text-red-400',
+          label: excessPerDay < 0 ? 'Way too aggressive' : (dailyGoal < 0 ? 'Way over goal' : (dailyGoal > 0 ? 'Way under goal' : 'Off maintenance')),
+          dot: 'bg-red-400',
+        };
       })();
       const ouraConnected = !!(state.oura && state.oura.last_sync_at);
       const haveAnyMeals = bal.cumulative.days > 0 || bal.today.intake > 0;
@@ -1863,8 +1876,8 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
             <div className="text-[15px] text-neutral-400">Log {3 - bal.cumulative.days} more day{3 - bal.cumulative.days === 1 ? '' : 's'} to see 7-day pace</div>
           )}
           <div className="text-[11px] text-neutral-600 font-mono mt-1.5">
-            {bal.cumulative.days >= 3
-              ? `vs target ${fmt(proratedGoal)} · ${bal.cumulative.days}d × ${goalText}`
+            {bal.cumulative.days >= 3 && avgDailyDelta != null
+              ? `${bal.cumulative.days}d logged · avg ${fmt(avgDailyDelta)}/d vs goal ${dailyGoal}/d`
               : `7d cumulative · goal ${goalText}`}
           </div>
         </div>
@@ -1905,7 +1918,6 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
 
           {/* Course correction: surface what the auto-adjustment is and why */}
           {bal.cumulative.days >= 3 ? (() => {
-            const pace = computeWeeklyPace(state);
             const targetsWithPace = computeMacroTargets(state.bodyStats, state.oura, pace, computeBodyDiag(state));
             const adj = targetsWithPace.adjustment;
             // adj > 0 = eat more today (you were too aggressive). adj < 0 = eat less (not deficit enough).
