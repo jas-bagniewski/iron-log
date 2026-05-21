@@ -2710,6 +2710,8 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
       const [qty, setQty] = useState(1);
       const [estimating, setEstimating] = useState(false);
       const [estimateError, setEstimateError] = useState(null);
+      const [portionConfidence, setPortionConfidence] = useState(initial?.portion_confidence || null);
+      const [portionNote, setPortionNote] = useState(initial?.portion_note || null);
 
       useEffect(() => {
         if (initial) {
@@ -2719,6 +2721,8 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
           setCarbs(initial.carbs ?? '');
           setFat(initial.fat ?? '');
           setItems(initial.items || null);
+          setPortionConfidence(initial.portion_confidence || null);
+          setPortionNote(initial.portion_note || null);
         }
         setQty(1);
       }, [initial]);
@@ -2755,6 +2759,8 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
           setCarbs(String(total.carbs_g || 0));
           setFat(String(total.fat_g || 0));
           setItems(result.items || null);
+          setPortionConfidence(result.portion_confidence || null);
+          setPortionNote(result.portion_note || null);
         } catch (e) {
           setEstimateError(e.message || 'Estimate failed');
         } finally {
@@ -2791,6 +2797,21 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
           )}
           {estimateError && (
             <div className="mb-3 px-3 py-2 rounded-lg border border-red-900/40 bg-red-950/30 text-red-300 text-[11px]">{estimateError}</div>
+          )}
+          {portionNote && portionConfidence !== 'high' && (
+            <div className={`mb-3 px-3 py-2 rounded-lg border text-[11px] leading-snug flex items-start gap-2 ${
+              portionConfidence === 'low'
+                ? 'border-orange-900/40 bg-orange-950/20 text-orange-300'
+                : 'border-neutral-800 bg-neutral-900 text-neutral-300'
+            }`}>
+              <Camera size={12} className="shrink-0 mt-0.5" />
+              <div>
+                <div className="font-semibold mb-0.5">
+                  {portionConfidence === 'low' ? 'Portion is a rough guess' : 'Portion estimate could be sharper'}
+                </div>
+                <div className="opacity-90">{portionNote}</div>
+              </div>
+            </div>
           )}
           <div className="grid grid-cols-4 gap-2 mb-3">
             {numField('Cal', kcal, setKcal)}
@@ -3237,6 +3258,8 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
             carbs: total.carbs_g || 0,
             fat: total.fat_g || 0,
             items: result.items || [],
+            portion_confidence: result.portion_confidence || null,
+            portion_note: result.portion_note || null,
           });
           setMode('photo-confirm');
         } catch (e) {
