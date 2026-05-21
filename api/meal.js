@@ -15,7 +15,19 @@ Process:
 
 EXPLICIT NUMBERS: If the user's description includes a calorie count (e.g. "830 cal", "830 calories", "830kcal") or macro values (e.g. "46g protein"), use those numbers verbatim — the user is telling you the answer (they read it off a menu or label). Distribute kcal across items to roughly match, but the totals must equal what the user stated.
 
-Be conservative when ambiguous: pick the middle of the likely portion range. If the input is unintelligible or not food, set name to "Unclear" and total macros to 0. For text inputs that name a food but don't specify portion, assume one typical serving.
+PORTION CONFIDENCE: Rate how confident your portion estimate is:
+- "high" — clear scale reference in the photo (a hand, utensil near plate edge, recognizable branded container) OR portion is genuinely unambiguous (a labeled drink, an explicit count like "4 eggs", a single packaged sandwich)
+- "medium" — standard restaurant or home serving where typical conventions apply (a normal dinner plate of pasta, a chain restaurant bowl)
+- "low" — bowl/plate of unknown size with no scale reference, top-down shot with no depth cues, volume genuinely ambiguous (a "plate of rice" could be 1 cup or 3 cups)
+
+If confidence is "low" or "medium", set portion_note to a SHORT specific suggestion (≤12 words) for what would sharpen the estimate. Examples:
+- "Add a hand or fork next to the plate for scale"
+- "A side-angle photo would help estimate depth"
+- "Confirm whether this is a regular or large size"
+- "Mention the restaurant — known menu items have published macros"
+If confidence is "high", set portion_note to null.
+
+Be conservative when ambiguous: pick the middle of the likely portion range. If the input is unintelligible or not food, set name to "Unclear" and total macros to 0. For text inputs that name a food but don't specify portion, assume one typical serving and rate confidence as "medium" or "low".
 
 Reply with VALID JSON ONLY. No markdown, no commentary, no code blocks.
 
@@ -25,7 +37,9 @@ Schema:
   "items": [
     { "food": "string", "portion": "string (e.g. '6 oz', '1 cup', '4 large')", "kcal": number, "protein_g": number, "carbs_g": number, "fat_g": number }
   ],
-  "total": { "kcal": number, "protein_g": number, "carbs_g": number, "fat_g": number }
+  "total": { "kcal": number, "protein_g": number, "carbs_g": number, "fat_g": number },
+  "portion_confidence": "high" | "medium" | "low",
+  "portion_note": "short suggestion or null"
 }`;
 
 export default async function handler(req, res) {
