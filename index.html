@@ -2056,6 +2056,7 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
     // CALORIE BALANCE CARD (7-day cumulative + yesterday + today so far)
     // ============================================================
     const CalorieBalanceCard = ({ state, onOpenDiet }) => {
+      const [infoTile, setInfoTile] = useState(null); // 'today' | 'yesterday' | '7day' | null
       const bal = computeCalorieBalance(state);
       const targets = computeMacroTargets(state.bodyStats, state.oura, null, computeBodyDiag(state));
       const dailyGoal = targets.baseKcal - targets.maintenance; // negative cutting, 0 maintain, positive bulk
@@ -2165,9 +2166,12 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
       );
       return (
         <ExpandableCard summary={summary}>
-          <div className="grid grid-cols-3 gap-2 mb-3">
-            <div>
-              <div className="text-[10px] uppercase tracking-wider text-neutral-500 font-mono">Today</div>
+          <div className="grid grid-cols-3 gap-2 mb-1">
+            <button onClick={(e) => { e.stopPropagation(); setInfoTile(infoTile === 'today' ? null : 'today'); }}
+              className={`text-left p-1.5 -m-1.5 rounded-lg ${infoTile === 'today' ? 'bg-neutral-900' : ''}`}>
+              <div className="text-[10px] uppercase tracking-wider text-neutral-500 font-mono flex items-center gap-1">
+                Today <span className="text-neutral-700 text-[9px]">ⓘ</span>
+              </div>
               <div className={`font-mono text-xl font-bold leading-tight ${todayZone.color}`}>{fmt(bal.today.net)}</div>
               {todayZone.label && (
                 <div className={`text-[9px] uppercase tracking-wider font-mono font-semibold ${todayZone.color}`}>{todayZone.label}</div>
@@ -2175,9 +2179,12 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
               <div className="text-[9px] uppercase tracking-wider text-neutral-600 font-mono mt-0.5">
                 {Math.round(bal.today.intake)} in · {Math.round(bal.today.burn)} out{bal.today.fromOura ? '' : ' (est)'}
               </div>
-            </div>
-            <div>
-              <div className="text-[10px] uppercase tracking-wider text-neutral-500 font-mono">Yesterday</div>
+            </button>
+            <button onClick={(e) => { e.stopPropagation(); setInfoTile(infoTile === 'yesterday' ? null : 'yesterday'); }}
+              className={`text-left p-1.5 -m-1.5 rounded-lg ${infoTile === 'yesterday' ? 'bg-neutral-900' : ''}`}>
+              <div className="text-[10px] uppercase tracking-wider text-neutral-500 font-mono flex items-center gap-1">
+                Yesterday <span className="text-neutral-700 text-[9px]">ⓘ</span>
+              </div>
               <div className={`font-mono text-xl font-bold leading-tight ${yesterdayZone.color}`}>
                 {bal.yesterday.hasIntake ? fmt(bal.yesterday.net) : '—'}
               </div>
@@ -2187,15 +2194,76 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
               <div className="text-[9px] uppercase tracking-wider text-neutral-600 font-mono mt-0.5">
                 {bal.yesterday.hasIntake ? `${Math.round(bal.yesterday.intake)} in · ${Math.round(bal.yesterday.burn)} out` : 'no meals logged'}
               </div>
-            </div>
-            <div>
-              <div className="text-[10px] uppercase tracking-wider text-neutral-500 font-mono">7-day</div>
+            </button>
+            <button onClick={(e) => { e.stopPropagation(); setInfoTile(infoTile === '7day' ? null : '7day'); }}
+              className={`text-left p-1.5 -m-1.5 rounded-lg ${infoTile === '7day' ? 'bg-neutral-900' : ''}`}>
+              <div className="text-[10px] uppercase tracking-wider text-neutral-500 font-mono flex items-center gap-1">
+                7-day <span className="text-neutral-700 text-[9px]">ⓘ</span>
+              </div>
               <div className={`font-mono text-xl font-bold leading-tight ${goalZone.color}`}>{fmt(bal.cumulative.net)}</div>
               <div className="text-[9px] uppercase tracking-wider text-neutral-600 font-mono mt-0.5">
                 {bal.cumulative.days}/7 days logged · ≈{(Math.abs(bal.cumulative.net) / 3500).toFixed(1)} lb {bal.cumulative.net < 0 ? 'loss' : 'gain'}
               </div>
-            </div>
+            </button>
           </div>
+
+          {infoTile && (() => {
+            const todayBurnLooksOff = bal.today.fromOura && bal.today.fractionOfDay < 0.5 && bal.today.burn > 2500;
+            if (infoTile === 'today') return (
+              <div className="bg-neutral-900 border border-neutral-800 rounded-lg p-3 mb-3 text-[11px] leading-relaxed">
+                <div className="text-[10px] uppercase tracking-[0.2em] text-neutral-500 font-mono mb-1.5">TODAY · HOW IT'S CALCULATED</div>
+                <div className="font-mono text-neutral-300 space-y-0.5">
+                  <div>IN: {Math.round(bal.today.intake)} cal (meals logged so far today)</div>
+                  <div>OUT: {Math.round(bal.today.burn)} cal ({bal.today.fromOura ? 'Oura today' : `estimated · ${Math.round((bal.today.fractionOfDay || 0) * 100)}% of TDEE`})</div>
+                  <div className="text-neutral-100">NET: {Math.round(bal.today.intake)} − {Math.round(bal.today.burn)} = <span className={todayZone.color}>{fmt(bal.today.net)}</span></div>
+                </div>
+                <div className="text-neutral-400 mt-2 leading-snug">
+                  Label is intake pace by time-of-day, not the net. Goal is to be eating at ~target × hours-elapsed.
+                </div>
+                {todayBurnLooksOff && (
+                  <div className="text-orange-300 mt-2 leading-snug border-t border-neutral-800 pt-2">
+                    ⚠ Oura's reported burn for today looks high for this time of day. May be returning a full-day projection rather than measured-so-far.
+                  </div>
+                )}
+              </div>
+            );
+            if (infoTile === 'yesterday') {
+              const y = bal.yesterday;
+              const dist = y.hasIntake ? y.net - dailyGoal : null;
+              return (
+                <div className="bg-neutral-900 border border-neutral-800 rounded-lg p-3 mb-3 text-[11px] leading-relaxed">
+                  <div className="text-[10px] uppercase tracking-[0.2em] text-neutral-500 font-mono mb-1.5">YESTERDAY · HOW IT'S CALCULATED</div>
+                  {y.hasIntake ? (
+                    <div className="font-mono text-neutral-300 space-y-0.5">
+                      <div>IN: {Math.round(y.intake)} cal</div>
+                      <div>OUT: {Math.round(y.burn)} cal (Oura)</div>
+                      <div className="text-neutral-100">NET: {Math.round(y.intake)} − {Math.round(y.burn)} = <span className={yesterdayZone.color}>{fmt(y.net)}</span></div>
+                      <div className="text-neutral-500 mt-1">Daily goal: {dailyGoal} cal/d</div>
+                      <div className="text-neutral-500">Distance from goal: {dist > 0 ? '+' : ''}{Math.round(dist)} cal</div>
+                    </div>
+                  ) : (
+                    <div className="text-neutral-400">No meals logged yesterday.</div>
+                  )}
+                </div>
+              );
+            }
+            if (infoTile === '7day') {
+              const avg = bal.cumulative.days > 0 ? Math.round(bal.cumulative.net / bal.cumulative.days) : 0;
+              return (
+                <div className="bg-neutral-900 border border-neutral-800 rounded-lg p-3 mb-3 text-[11px] leading-relaxed">
+                  <div className="text-[10px] uppercase tracking-[0.2em] text-neutral-500 font-mono mb-1.5">7-DAY · HOW IT'S CALCULATED</div>
+                  <div className="font-mono text-neutral-300 space-y-0.5">
+                    <div>Days counted: {bal.cumulative.days} of 7 (each had ≥1000 cal logged)</div>
+                    <div>Window: the 7 days BEFORE today (today is in progress, not included)</div>
+                    <div className="text-neutral-100">Cumulative net: <span className={goalZone.color}>{fmt(bal.cumulative.net)}</span></div>
+                    <div className="text-neutral-500 mt-1">Avg per day: {avg > 0 ? '+' : ''}{avg} vs goal {dailyGoal}</div>
+                    <div className="text-neutral-500">≈ {(Math.abs(bal.cumulative.net) / 3500).toFixed(2)} lb {bal.cumulative.net < 0 ? 'lost' : 'gained'} (3500 cal/lb of fat)</div>
+                  </div>
+                </div>
+              );
+            }
+            return null;
+          })()}
 
           {/* Course correction: surface what the auto-adjustment is and why */}
           {bal.cumulative.days >= 3 ? (() => {
