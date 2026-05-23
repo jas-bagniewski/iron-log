@@ -754,6 +754,12 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
       // estimate today's burn so far as fractionOfDay * average daily burn.
       const ouraToday = state.oura && state.oura.total_burn_today;
       const todayBurnSoFar = ouraToday != null ? ouraToday : Math.round(fallbackTdee * fractionOfDay);
+      // Project to end-of-day: take the higher of what's burned so far vs the
+      // user's typical full-day burn (Oura 7d avg) or TDEE estimate. Otherwise
+      // the user stops eating at 9pm seeing "-200" and wakes up at "-500"
+      // because BMR kept ticking past dinner.
+      const expectedFullDayBurn = (state.oura && state.oura.total_burn_7d_avg) || fallbackTdee;
+      const projectedBurn = Math.max(todayBurnSoFar, expectedFullDayBurn);
 
       return {
         cumulative: {
@@ -768,6 +774,8 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
         today: {
           intake: todayIntake, burn: todayBurnSoFar,
           net: todayIntake - todayBurnSoFar,
+          projectedBurn,
+          projectedNet: todayIntake - projectedBurn,
           fractionOfDay,
           fromOura: ouraToday != null,
         },
@@ -2172,12 +2180,12 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
               <div className="text-[10px] uppercase tracking-wider text-neutral-500 font-mono flex items-center gap-1">
                 Today <span className="text-neutral-700 text-[9px]">ⓘ</span>
               </div>
-              <div className={`font-mono text-xl font-bold leading-tight ${todayZone.color}`}>{fmt(bal.today.net)}</div>
+              <div className={`font-mono text-xl font-bold leading-tight ${todayZone.color}`}>{fmt(bal.today.projectedNet)}</div>
               {todayZone.label && (
                 <div className={`text-[9px] uppercase tracking-wider font-mono font-semibold ${todayZone.color}`}>{todayZone.label}</div>
               )}
               <div className="text-[9px] uppercase tracking-wider text-neutral-600 font-mono mt-0.5">
-                {Math.round(bal.today.intake)} in · {Math.round(bal.today.burn)} out{bal.today.fromOura ? '' : ' (est)'}
+                proj end-of-day · {Math.round(bal.today.intake)} in
               </div>
             </button>
             <button onClick={(e) => { e.stopPropagation(); setInfoTile(infoTile === 'yesterday' ? null : 'yesterday'); }}
@@ -2213,16 +2221,18 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
               <div className="bg-neutral-900 border border-neutral-800 rounded-lg p-3 mb-3 text-[11px] leading-relaxed">
                 <div className="text-[10px] uppercase tracking-[0.2em] text-neutral-500 font-mono mb-1.5">TODAY · HOW IT'S CALCULATED</div>
                 <div className="font-mono text-neutral-300 space-y-0.5">
-                  <div>IN: {Math.round(bal.today.intake)} cal (meals logged so far today)</div>
-                  <div>OUT: {Math.round(bal.today.burn)} cal ({bal.today.fromOura ? 'Oura today' : `estimated · ${Math.round((bal.today.fractionOfDay || 0) * 100)}% of TDEE`})</div>
-                  <div className="text-neutral-100">NET: {Math.round(bal.today.intake)} − {Math.round(bal.today.burn)} = <span className={todayZone.color}>{fmt(bal.today.net)}</span></div>
+                  <div>IN: {Math.round(bal.today.intake)} cal (meals logged so far)</div>
+                  <div>OUT now: {Math.round(bal.today.burn)} cal ({bal.today.fromOura ? 'Oura measured-so-far' : `est · ${Math.round((bal.today.fractionOfDay || 0) * 100)}% of TDEE`})</div>
+                  <div>OUT projected: {Math.round(bal.today.projectedBurn)} cal (typical full day)</div>
+                  <div className="text-neutral-500 mt-1">Net now: {fmt(bal.today.net)}</div>
+                  <div className="text-neutral-100">Net projected end-of-day: <span className={todayZone.color}>{fmt(bal.today.projectedNet)}</span> ← shown on tile</div>
                 </div>
                 <div className="text-neutral-400 mt-2 leading-snug">
-                  Label is intake pace by time-of-day, not the net. Goal is to be eating at ~target × hours-elapsed.
+                  The headline number projects where you'll land by midnight, accounting for evening + sleep burn. Otherwise you'd stop eating at 9pm thinking you're at -200 and wake up at -500.
                 </div>
                 {todayBurnLooksOff && (
                   <div className="text-orange-300 mt-2 leading-snug border-t border-neutral-800 pt-2">
-                    ⚠ Oura's reported burn for today looks high for this time of day. May be returning a full-day projection rather than measured-so-far.
+                    ⚠ Oura's measured-so-far for today looks high for this time of day. May be returning a full-day projection rather than incremental.
                   </div>
                 )}
               </div>
