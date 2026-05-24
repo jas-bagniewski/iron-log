@@ -3977,6 +3977,67 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
         applyHistoryEdit(next, accId);
       };
 
+      // Reverse what finishSession did, putting this session back to "in progress"
+      // so the user can resume editing it. Only enabled for the most-recent
+      // history entry, and only if there's no other active session (would clobber it).
+      const isMostRecent = canEdit && state.history[0] && state.history[0].completedAt === session.completedAt;
+      const canResume = isMostRecent && !state.activeSession;
+      const resume = () => {
+        if (!canResume) return;
+        let week = state.week;
+        let cycle = state.cycle;
+        let trainingMaxes = { ...state.trainingMaxes };
+        let completedThisWeek = { ...state.completedThisWeek, [session.dayId]: false };
+        let trainingMaxesHistory = state.trainingMaxesHistory || [];
+
+        // If finishing this session advanced the week (or cycle), reverse that.
+        if (session.week !== state.week || session.cycle !== state.cycle) {
+          // This session was the one that completed the week. Before it, all
+          // other days were done and this day was not.
+          completedThisWeek = { chest: true, fullbody: true, legs: true, back: true, [session.dayId]: false };
+          if (session.cycle !== state.cycle) {
+            // Cycle rolled over (W4 -> next cycle). Undo cycle-end TM bumps.
+            week = 4;
+            cycle = session.cycle;
+            trainingMaxes = {
+              bench: trainingMaxes.bench - 5,
+              squat: trainingMaxes.squat - 10,
+              deadlift: trainingMaxes.deadlift - 10,
+              press: (trainingMaxes.press || 110) - 5,
+            };
+            if (trainingMaxesHistory[0] && trainingMaxesHistory[0].source === 'cycle-end') {
+              trainingMaxesHistory = trainingMaxesHistory.slice(1);
+            }
+          } else {
+            week = state.week - 1;
+          }
+        }
+
+        // Undo any smart bump that fired in this session.
+        if (session.smartBumped) {
+          const { lift, fromTM } = session.smartBumped;
+          trainingMaxes = { ...trainingMaxes, [lift]: fromTM };
+          if (trainingMaxesHistory[0] && trainingMaxesHistory[0].source === 'smart-bump') {
+            trainingMaxesHistory = trainingMaxesHistory.slice(1);
+          }
+        }
+
+        const { completedAt, smartBumped, ...activeSession } = session;
+        const nextHistory = state.history.filter(s => s.completedAt !== session.completedAt);
+
+        onUpdateState({
+          ...state,
+          history: nextHistory,
+          activeSession,
+          completedThisWeek,
+          trainingMaxes,
+          trainingMaxesHistory,
+          cycle,
+          week,
+        });
+        onBack();
+      };
+
       const amrap = session.mainSets?.find(s => s.isAmrap && s.actualReps);
       const e1RM = amrap ? estimate1RM(amrap.weight, amrap.actualReps) : null;
       const completedMain = session.mainSets?.filter(s => s.completed) || [];
@@ -4115,6 +4176,18 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
                 })}
               </div>
             </>
+          )}
+
+          {canResume && (
+            <button onClick={resume}
+              className="w-full mt-6 py-3 rounded-lg border border-orange-500/40 bg-orange-500/5 text-orange-300 text-xs uppercase tracking-wider font-mono font-semibold hover:bg-orange-500/10 active:scale-[0.99]">
+              Reopen this workout
+            </button>
+          )}
+          {isMostRecent && !canResume && state.activeSession && (
+            <div className="w-full mt-6 px-3 py-2 rounded-lg border border-neutral-800 text-[11px] text-neutral-500 leading-snug">
+              Can't reopen — you already have an in-progress session for a different day. Finish or cancel that first.
+            </div>
           )}
         </div>
       );
