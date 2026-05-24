@@ -4185,8 +4185,15 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
             </button>
           )}
           {isMostRecent && !canResume && state.activeSession && (
-            <div className="w-full mt-6 px-3 py-2 rounded-lg border border-neutral-800 text-[11px] text-neutral-500 leading-snug">
-              Can't reopen — you already have an in-progress session for a different day. Finish or cancel that first.
+            <div className="w-full mt-6 px-3 py-3 rounded-lg border border-neutral-800 text-[11px] text-neutral-400 leading-snug">
+              <div className="mb-2">
+                Can't reopen — you have an in-progress session for <strong className="text-neutral-200">{DAY_TEMPLATES[state.activeSession.dayId]?.name || state.activeSession.dayId}</strong> blocking it.
+              </div>
+              <button
+                onClick={() => onUpdateState({ ...state, activeSession: null })}
+                className="w-full py-2 rounded-md border border-red-900/40 text-red-300/90 text-[10px] uppercase tracking-wider font-mono font-semibold hover:bg-red-950/20">
+                Discard the other session
+              </button>
             </div>
           )}
         </div>
