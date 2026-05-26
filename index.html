@@ -1669,26 +1669,45 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
               {refreshing ? 'Generating…' : 'Generate'}
             </button>
           </div>
-          <div className="text-sm text-neutral-400">Tap Generate for today's status digest.</div>
+          <div className="text-sm text-neutral-400">Tap Generate for today's holistic digest.</div>
         </div>
       );
       const s = summary.summary || summary;
+      // Support both new shape (verdict/synthesis/adjust/watch) and old (headline/training/diet/recovery/watch).
+      const verdict = s.verdict || s.headline;
       return (
         <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-4 mb-4">
-          <div className="flex items-center justify-between mb-2">
+          <div className="flex items-center justify-between mb-3">
             <div className="text-[10px] uppercase tracking-[0.2em] text-neutral-500 font-mono">TODAY'S DIGEST</div>
             <button onClick={onRefresh} disabled={refreshing}
               className="text-[10px] uppercase tracking-wider text-neutral-500 font-mono font-semibold hover:text-orange-300 disabled:opacity-40">
               {refreshing ? 'Refreshing…' : 'Refresh'}
             </button>
           </div>
-          {s.headline && <div className="text-sm font-semibold text-neutral-100 mb-2">{s.headline}</div>}
-          <div className="space-y-1.5 text-[12px]">
-            {s.training && <div className="flex gap-2"><span className="text-orange-400 font-mono text-[10px] uppercase tracking-wider w-16 shrink-0 pt-0.5">Train</span><span className="text-neutral-300">{s.training}</span></div>}
-            {s.diet && <div className="flex gap-2"><span className="text-orange-400 font-mono text-[10px] uppercase tracking-wider w-16 shrink-0 pt-0.5">Diet</span><span className="text-neutral-300">{s.diet}</span></div>}
-            {s.recovery && <div className="flex gap-2"><span className="text-orange-400 font-mono text-[10px] uppercase tracking-wider w-16 shrink-0 pt-0.5">Recover</span><span className="text-neutral-300">{s.recovery}</span></div>}
-            {s.watch && <div className="flex gap-2"><span className="text-orange-400 font-mono text-[10px] uppercase tracking-wider w-16 shrink-0 pt-0.5">Watch</span><span className="text-orange-200">{s.watch}</span></div>}
-          </div>
+          {verdict && <div className="text-sm font-bold text-neutral-50 mb-2.5 leading-snug">{verdict}</div>}
+          {s.synthesis && (
+            <div className="text-[13px] text-neutral-300 leading-relaxed mb-3">{s.synthesis}</div>
+          )}
+          {s.adjust && (
+            <div className="bg-neutral-950 border-l-2 border-orange-500/60 rounded-r-md px-3 py-2 mb-2">
+              <div className="text-[10px] uppercase tracking-[0.2em] text-orange-400 font-mono font-semibold mb-1">ADJUST</div>
+              <div className="text-[13px] text-neutral-100 leading-snug">{s.adjust}</div>
+            </div>
+          )}
+          {s.watch && (
+            <div className="text-[12px] text-neutral-400 leading-snug mt-2 flex gap-2">
+              <span className="text-orange-400 font-mono text-[10px] uppercase tracking-wider shrink-0 pt-0.5">Watch</span>
+              <span>{s.watch}</span>
+            </div>
+          )}
+          {/* Legacy shape fallback */}
+          {!s.synthesis && !s.adjust && (
+            <div className="space-y-1.5 text-[12px]">
+              {s.training && <div className="flex gap-2"><span className="text-orange-400 font-mono text-[10px] uppercase tracking-wider w-16 shrink-0 pt-0.5">Train</span><span className="text-neutral-300">{s.training}</span></div>}
+              {s.diet && <div className="flex gap-2"><span className="text-orange-400 font-mono text-[10px] uppercase tracking-wider w-16 shrink-0 pt-0.5">Diet</span><span className="text-neutral-300">{s.diet}</span></div>}
+              {s.recovery && <div className="flex gap-2"><span className="text-orange-400 font-mono text-[10px] uppercase tracking-wider w-16 shrink-0 pt-0.5">Recover</span><span className="text-neutral-300">{s.recovery}</span></div>}
+            </div>
+          )}
         </div>
       );
     };
@@ -2698,7 +2717,7 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
           {(() => {
             const today = todayKey();
             const summary = state.dailyCoachSummary && state.dailyCoachSummary.date === today ? state.dailyCoachSummary.summary : null;
-            const headline = summary && (summary.headline || summary.training || summary.diet);
+            const headline = summary && (summary.verdict || summary.headline);
             return (
               <button onClick={onCoach} className="w-full text-left bg-gradient-to-br from-neutral-950 to-neutral-900 border border-neutral-800 rounded-xl p-3 mb-3 hover:border-orange-500/40 active:scale-[0.99] flex items-center gap-3">
                 <div className="w-9 h-9 rounded-lg bg-orange-500/10 border border-orange-500/30 flex items-center justify-center shrink-0">

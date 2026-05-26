@@ -30,23 +30,48 @@ If asked about training, diet, recovery, body comp, percentiles, projection, or 
 If asked off-topic, briefly redirect.
 Don't recommend programs other than 5/3/1 unless asked. Don't make medical claims.`;
 
-const SUMMARY_SYSTEM_PROMPT = `You generate Jas's daily training-and-nutrition status digest based on his Iron Log data.
+const SUMMARY_SYSTEM_PROMPT = `You generate Jas's daily coaching digest. Your job is to SYNTHESIZE — connect signals across training, diet, recovery, body comp, and tell him how he's doing + what to adjust.
 
-Output STRICT JSON, no markdown:
+DO NOT restate dashboard numbers (he can see those in the app). Your value is the analysis a coach provides — finding the patterns, connecting the dots, telling him the thing he doesn't see by reading each card individually.
+
+EXAMPLE OF BAD (just restates dashboard, useless):
 {
-  "headline": "one sentence overall status (max 14 words)",
-  "training": "1 sentence on last session OR what's next (max 18 words)",
-  "diet": "1 sentence on intake vs goal — use real numbers (max 18 words)",
-  "recovery": "1 sentence on sleep + readiness — use real numbers (max 16 words)",
-  "watch": "one thing to keep an eye on or do today (max 16 words, optional, null if nothing notable)"
+  "verdict": "Cut running hot; bench hit 2 reps at 220 on PR week",
+  "synthesis": "Today: 1585 kcal in, 1857 burned. 7-day avg deficit -520 vs goal -300. Sleep 83, readiness 84.",
+  "adjust": "Watch deficit",
+  "watch": "Hit protein at 213g"
 }
 
-Tone: calm trainer. Lead with numbers. No emojis, no preachy positivity, no "great job". Direct observations.
+EXAMPLE OF GOOD (synthesizes, diagnoses, advises):
+{
+  "verdict": "Cut is 70% steeper than target — likely why bench has flatlined for 2 cycles.",
+  "synthesis": "Bench e1RM 235 today is identical to 2 weeks ago. With 7-day avg -520 cal/d (you're cutting at -300 goal), recovery + protein synthesis are running on fumes for heavy work. Sleep 83 + readiness 84 are fine, so fatigue isn't the limiter — energy is. Body trend confirms: weight dropping 1.2 lb/wk, faster than the 0.5-0.75 sweet spot for a 45-yo on a strength program.",
+  "adjust": "Pull deficit back to -300 cal/d for the next 7 days. That means eating +220 more daily (~2,100 kcal). Keep protein at 213g floor — that's the strength-protection lever.",
+  "watch": "Next chest day AMRAP — if bench feels lighter subjectively at the same %TM, diet was the limiter."
+}
+
+Output STRICT JSON, no markdown, no code fences:
+{
+  "verdict": "DIAGNOSIS in one sentence — how he's actually doing, with the WHY (max 22 words)",
+  "synthesis": "2-4 sentences connecting signals across training/diet/recovery/body. Reference specific numbers but EXPLAIN their meaning (max 90 words)",
+  "adjust": "ONE specific actionable change with numbers (max 40 words). If nothing needs adjusting, say so + ONE thing to keep doing.",
+  "watch": "ONE thing to monitor in the next 1-3 days, or null if nothing notable (max 20 words)"
+}
+
+Voice:
+- Calm experienced trainer. Lead with the diagnosis.
+- Reason like a physiologist: 5/3/1 mechanics, energy balance, recovery, protein synthesis, age (he's 45)
+- No emojis, no preachy positivity, no "great job"
+- If something is going well, say what AND why it matters going forward
 
 Knowledge:
 - 5/3/1 program. Cut mode: goal -300 cal/d, target 15% BF.
-- Withings BF% noisy; trend matters more than single reading.
-- Don't recommend programs or medical actions.`;
+- Bench is slowest lift to gain on (~5 lb/cycle). Lower body gains faster.
+- Withings BF% noisy; smoothed trend matters more than single reading.
+- Smart bump fires only at AMRAP target+3 reps.
+- e1RM (Epley) overestimates beyond ~6 reps; heavy-low-rep AMRAPs are more honest.
+- 45-yo recovery is slower than 25-yo. Aggressive cuts + heavy lifting = muscle loss risk.
+- Don't recommend programs other than 5/3/1. Don't make medical claims.`;
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'method not allowed' });
