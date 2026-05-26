@@ -102,6 +102,7 @@
     const X = (p) => <Icon {...p}><path d="M18 6 6 18"/><path d="m6 6 12 12"/></Icon>;
     const Loader = (p) => <Icon {...p}><line x1="12" x2="12" y1="2" y2="6"/><line x1="12" x2="12" y1="18" y2="22"/><line x1="4.93" x2="7.76" y1="4.93" y2="7.76"/><line x1="16.24" x2="19.07" y1="16.24" y2="19.07"/><line x1="2" x2="6" y1="12" y2="12"/><line x1="18" x2="22" y1="12" y2="12"/><line x1="4.93" x2="7.76" y1="19.07" y2="16.24"/><line x1="16.24" x2="19.07" y1="7.76" y2="4.93"/></Icon>;
     const Home = (p) => <Icon {...p}><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></Icon>;
+    const Sparkle = (p) => <Icon {...p}><path d="M12 3l1.9 5.7L19.5 11l-5.6 1.9L12 18l-1.9-5.1L4.5 11l5.6-2.3z"/></Icon>;
     const BarChart = (p) => <Icon {...p}><line x1="12" x2="12" y1="20" y2="10"/><line x1="18" x2="18" y1="20" y2="4"/><line x1="6" x2="6" y1="20" y2="16"/></Icon>;
 
     // ============================================================
@@ -569,6 +570,8 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
       oura: null, // see oura/sync.js response shape
       snackPreferences: DEFAULT_SNACK_PREFERENCES, // free text: foods user likes / avoids, used by /api/topoff
       bodyScans: [], // [{ id, date, photos: [{ data, angle }], analysis, scaleWeight, scaleBf }] — newest first
+      coachThread: [], // [{ role: 'user'|'assistant', content, ts }] — last ~30 messages
+      dailyCoachSummary: null, // { date: 'YYYY-MM-DD', summary: {...}, generatedAt }
     };
 
     // Append a new TM snapshot only if it differs from the most recent one.
@@ -706,6 +709,74 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
         avgBurn: Math.round(burnSum / days),
         actualDailyDelta: Math.round((intakeSum - burnSum) / days),
         perDay,
+      };
+    };
+
+    // Compact JSON digest of the user's state — sent to the AI coach so it
+    // can reason across training, diet, body comp, recovery without us shipping
+    // megabytes of history per message. Keep this LEAN; every field costs tokens.
+    const buildCoachContext = (state) => {
+      const bs = state.bodyStats || {};
+      const trend = computeBodyTrend(state, 30);
+      const balance = computeCalorieBalance(state);
+      const pace = computeWeeklyPace(state);
+      const targets = computeMacroTargets(bs, state.oura, pace, computeBodyDiag(state));
+      const tm = state.trainingMaxes || {};
+      const recent = (state.history || []).slice(0, 6).map(s => ({
+        name: s.name,
+        date: s.completedAt,
+        c: s.cycle, w: s.week, label: s.weekLabel,
+        mainLift: s.mainLift,
+        mainSets: (s.mainSets || []).map(set => ({
+          weight: set.weight,
+          reps: set.actualReps != null ? set.actualReps : (set.completed ? set.targetReps : null),
+          target: set.targetReps,
+          amrap: !!set.isAmrap,
+          done: !!set.completed,
+        })),
+        smartBumped: s.smartBumped || null,
+      }));
+      const oura = state.oura && state.oura.last_sync_at ? {
+        sleep: state.oura.sleep_score_yesterday,
+        readiness: state.oura.readiness_score_today,
+        burn_today: state.oura.total_burn_today,
+        burn_yesterday: state.oura.total_burn_yesterday,
+        burn_7d_avg: state.oura.total_burn_7d_avg,
+        active_7d_avg: state.oura.active_burn_7d_avg,
+      } : null;
+      const lastScan = (state.bodyScans || [])[0];
+      return {
+        body: {
+          weight: bs.weight,
+          bf: bs.bodyFatPct,
+          weight_smoothed: trend.weightSmoothed != null ? Math.round(trend.weightSmoothed * 10) / 10 : null,
+          bf_smoothed: trend.bfSmoothed != null ? Math.round(trend.bfSmoothed * 10) / 10 : null,
+          bf_rate_per_week: trend.bfRate != null ? Math.round(trend.bfRate * 100) / 100 : null,
+          weight_rate_per_week: trend.weightRate != null ? Math.round(trend.weightRate * 100) / 100 : null,
+          goal_bf: bs.goalBodyFatPct,
+          age: bs.age, sex: bs.sex,
+          last_scan: lastScan ? { date: lastScan.date, visual_bf: lastScan.analysis?.visual_bf_estimate } : null,
+        },
+        diet: {
+          today_intake: Math.round(balance.today.intake),
+          today_burn: Math.round(balance.today.burn),
+          today_projected_net: Math.round(balance.today.projectedNet),
+          seven_day_cumulative: Math.round(balance.cumulative.net),
+          days_logged: balance.cumulative.days,
+          avg_daily_net: pace.hasEnoughData ? Math.round(pace.actualDailyDelta) : null,
+          target_daily_delta: Math.round(targets.baseKcal - targets.maintenance),
+          target_kcal: targets.kcal,
+          target_protein_g: targets.protein,
+          mode: targets.mode,
+        },
+        training: {
+          cycle: state.cycle,
+          week: state.week,
+          week_label: WEEK_SCHEMES[state.week]?.label,
+          training_maxes: tm,
+          recent_sessions: recent,
+        },
+        recovery: oura,
       };
     };
 
@@ -1581,6 +1652,198 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
     };
 
     // ============================================================
+    // COACH VIEW (AI chat + daily summary)
+    // ============================================================
+    const formatChatTime = (iso) => {
+      try { return new Date(iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }); }
+      catch { return ''; }
+    };
+
+    const CoachSummaryBlock = ({ summary, onRefresh, refreshing }) => {
+      if (!summary) return (
+        <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-4 mb-4">
+          <div className="flex items-center justify-between mb-2">
+            <div className="text-[10px] uppercase tracking-[0.2em] text-neutral-500 font-mono">TODAY'S DIGEST</div>
+            <button onClick={onRefresh} disabled={refreshing}
+              className="text-[10px] uppercase tracking-wider text-orange-400 font-mono font-semibold hover:text-orange-300 disabled:opacity-40">
+              {refreshing ? 'Generating…' : 'Generate'}
+            </button>
+          </div>
+          <div className="text-sm text-neutral-400">Tap Generate for today's status digest.</div>
+        </div>
+      );
+      const s = summary.summary || summary;
+      return (
+        <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-4 mb-4">
+          <div className="flex items-center justify-between mb-2">
+            <div className="text-[10px] uppercase tracking-[0.2em] text-neutral-500 font-mono">TODAY'S DIGEST</div>
+            <button onClick={onRefresh} disabled={refreshing}
+              className="text-[10px] uppercase tracking-wider text-neutral-500 font-mono font-semibold hover:text-orange-300 disabled:opacity-40">
+              {refreshing ? 'Refreshing…' : 'Refresh'}
+            </button>
+          </div>
+          {s.headline && <div className="text-sm font-semibold text-neutral-100 mb-2">{s.headline}</div>}
+          <div className="space-y-1.5 text-[12px]">
+            {s.training && <div className="flex gap-2"><span className="text-orange-400 font-mono text-[10px] uppercase tracking-wider w-16 shrink-0 pt-0.5">Train</span><span className="text-neutral-300">{s.training}</span></div>}
+            {s.diet && <div className="flex gap-2"><span className="text-orange-400 font-mono text-[10px] uppercase tracking-wider w-16 shrink-0 pt-0.5">Diet</span><span className="text-neutral-300">{s.diet}</span></div>}
+            {s.recovery && <div className="flex gap-2"><span className="text-orange-400 font-mono text-[10px] uppercase tracking-wider w-16 shrink-0 pt-0.5">Recover</span><span className="text-neutral-300">{s.recovery}</span></div>}
+            {s.watch && <div className="flex gap-2"><span className="text-orange-400 font-mono text-[10px] uppercase tracking-wider w-16 shrink-0 pt-0.5">Watch</span><span className="text-orange-200">{s.watch}</span></div>}
+          </div>
+        </div>
+      );
+    };
+
+    const CoachView = ({ state, onUpdateState }) => {
+      const [input, setInput] = useState('');
+      const [sending, setSending] = useState(false);
+      const [error, setError] = useState(null);
+      const [refreshingSummary, setRefreshingSummary] = useState(false);
+      const scrollRef = React.useRef(null);
+      const messages = state.coachThread || [];
+      const todayKeyStr = todayKey();
+      const summary = state.dailyCoachSummary && state.dailyCoachSummary.date === todayKeyStr ? state.dailyCoachSummary : null;
+
+      useEffect(() => {
+        if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+      }, [messages.length, sending]);
+
+      const send = async () => {
+        const text = input.trim();
+        if (!text || sending) return;
+        const secret = cloudSync.getSecret();
+        if (!secret) { setError('Set your cloud sync secret in Settings first'); return; }
+        setError(null);
+        setSending(true);
+        const userMsg = { role: 'user', content: text, ts: new Date().toISOString() };
+        const nextThread = [...messages, userMsg].slice(-30);
+        onUpdateState({ ...state, coachThread: nextThread });
+        setInput('');
+        try {
+          const r = await fetch('/api/coach', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', 'x-sync-secret': secret },
+            body: JSON.stringify({
+              mode: 'chat',
+              context: buildCoachContext(state),
+              history: nextThread.slice(0, -1).map(m => ({ role: m.role, content: m.content })),
+              message: text,
+            }),
+          });
+          const j = await r.json();
+          if (!r.ok) { setError(j.error || j.detail || `HTTP ${r.status}`); return; }
+          const assistantMsg = { role: 'assistant', content: j.reply || '', ts: new Date().toISOString() };
+          onUpdateState({ ...state, coachThread: [...nextThread, assistantMsg].slice(-30) });
+        } catch (e) {
+          setError(String(e.message || e));
+        } finally {
+          setSending(false);
+        }
+      };
+
+      const refreshSummary = async () => {
+        const secret = cloudSync.getSecret();
+        if (!secret) { setError('Set your cloud sync secret in Settings first'); return; }
+        setRefreshingSummary(true);
+        setError(null);
+        try {
+          const r = await fetch('/api/coach', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', 'x-sync-secret': secret },
+            body: JSON.stringify({ mode: 'summary', context: buildCoachContext(state) }),
+          });
+          const j = await r.json();
+          if (!r.ok) { setError(j.error || j.detail || `HTTP ${r.status}`); return; }
+          onUpdateState({
+            ...state,
+            dailyCoachSummary: {
+              date: todayKey(),
+              summary: j.summary,
+              generatedAt: new Date().toISOString(),
+            },
+          });
+        } catch (e) {
+          setError(String(e.message || e));
+        } finally {
+          setRefreshingSummary(false);
+        }
+      };
+
+      const clearThread = () => {
+        if (confirm('Clear chat history?')) {
+          onUpdateState({ ...state, coachThread: [] });
+        }
+      };
+
+      return (
+        <div className="px-5 pb-32 pt-6 max-w-2xl mx-auto">
+          <div className="flex items-center justify-between mb-4">
+            <div className="font-display text-3xl tracking-wide text-neutral-50">COACH</div>
+            {messages.length > 0 && (
+              <button onClick={clearThread} className="text-[10px] uppercase tracking-wider text-neutral-500 font-mono hover:text-neutral-300">
+                Clear chat
+              </button>
+            )}
+          </div>
+
+          <CoachSummaryBlock summary={summary} onRefresh={refreshSummary} refreshing={refreshingSummary} />
+
+          <div ref={scrollRef} className="space-y-3 mb-4 max-h-[55vh] overflow-y-auto">
+            {messages.length === 0 ? (
+              <div className="text-center py-8 text-sm text-neutral-500">
+                Ask anything about your training, diet, recovery, or body comp.<br />
+                <span className="text-neutral-600 text-[12px]">e.g. "did my chest go backwards today?" · "how many more reps to advanced?" · "should I deload?"</span>
+              </div>
+            ) : (
+              messages.map((m, i) => (
+                <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                  <div className={`max-w-[85%] rounded-2xl px-3.5 py-2.5 ${
+                    m.role === 'user'
+                      ? 'bg-orange-500/90 text-black'
+                      : 'bg-neutral-900 border border-neutral-800 text-neutral-100'
+                  }`}>
+                    <div className="text-sm whitespace-pre-wrap leading-relaxed">{m.content}</div>
+                    <div className={`text-[9px] mt-1 font-mono ${m.role === 'user' ? 'text-black/50' : 'text-neutral-500'}`}>{formatChatTime(m.ts)}</div>
+                  </div>
+                </div>
+              ))
+            )}
+            {sending && (
+              <div className="flex justify-start">
+                <div className="bg-neutral-900 border border-neutral-800 rounded-2xl px-3.5 py-2.5 flex items-center gap-2">
+                  <div className="w-2 h-2 rounded-full bg-orange-500 animate-pulse" />
+                  <div className="text-xs text-neutral-500 font-mono uppercase tracking-wider">Thinking…</div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {error && (
+            <div className="mb-3 px-3 py-2 rounded-lg border border-red-900/40 bg-red-950/30 text-red-300 text-xs">{error}</div>
+          )}
+
+          <div className="fixed bottom-0 left-0 right-0 bg-gradient-to-t from-black via-black/95 to-transparent" style={{ paddingBottom: 'calc(60px + env(safe-area-inset-bottom))' }}>
+            <div className="max-w-2xl mx-auto px-5 pt-3 pb-2">
+              <div className="flex gap-2 items-end">
+                <textarea
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
+                  placeholder="Ask the coach…"
+                  rows={1}
+                  className="flex-1 bg-neutral-900 border border-neutral-800 focus:border-orange-500 rounded-xl px-3 py-2.5 text-neutral-50 text-sm outline-none resize-none max-h-32"
+                />
+                <button onClick={send} disabled={!input.trim() || sending}
+                  className={`px-4 py-2.5 rounded-xl uppercase tracking-wider text-xs font-bold ${input.trim() && !sending ? 'bg-orange-500 text-black hover:bg-orange-400 active:scale-[0.99]' : 'bg-neutral-900 text-neutral-600'}`}>
+                  Send
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    };
+
+    // ============================================================
     // BODY SCAN VIEW (photo-based BF% sanity check + observations)
     // ============================================================
     // Resize/JPEG-compress a File so multiple scans fit in the synced state.
@@ -2409,7 +2672,7 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
       );
     };
 
-    const HomeView = ({ state, syncStatus, onSettings, onDiet, onBodyScan }) => {
+    const HomeView = ({ state, syncStatus, onSettings, onDiet, onBodyScan, onCoach }) => {
       return (
         <div className="px-5 pb-28 pt-8 max-w-2xl mx-auto">
           <div className="flex items-center justify-between mb-6">
@@ -2432,6 +2695,25 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
             </div>
           </div>
 
+          {(() => {
+            const today = todayKey();
+            const summary = state.dailyCoachSummary && state.dailyCoachSummary.date === today ? state.dailyCoachSummary.summary : null;
+            const headline = summary && (summary.headline || summary.training || summary.diet);
+            return (
+              <button onClick={onCoach} className="w-full text-left bg-gradient-to-br from-neutral-950 to-neutral-900 border border-neutral-800 rounded-xl p-3 mb-3 hover:border-orange-500/40 active:scale-[0.99] flex items-center gap-3">
+                <div className="w-9 h-9 rounded-lg bg-orange-500/10 border border-orange-500/30 flex items-center justify-center shrink-0">
+                  <Sparkle size={16} className="text-orange-400" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="text-[10px] uppercase tracking-[0.2em] text-neutral-500 font-mono mb-0.5">COACH</div>
+                  <div className="text-[13px] text-neutral-200 leading-snug truncate">
+                    {headline || "Tap to chat or get today's status digest"}
+                  </div>
+                </div>
+                <ChevronRight size={16} className="text-neutral-600 shrink-0" />
+              </button>
+            );
+          })()}
           <TodayDietTile state={state} onOpenDiet={onDiet} />
           <CalorieBalanceCard state={state} onOpenDiet={onDiet} />
           <BodyCompositionCard state={state} onOpenSettings={onSettings} onOpenBodyScan={onBodyScan} />
@@ -4921,14 +5203,15 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
         }
       };
 
-      const tabBarVisible = view === 'home' || view === 'log' || view === 'diet';
+      const tabBarVisible = view === 'home' || view === 'log' || view === 'diet' || view === 'coach';
 
       return (
         <div className="min-h-screen bg-black text-neutral-100">
-          {view === 'home' && <HomeView state={state} syncStatus={syncStatus} onSettings={() => setView('settings')} onDiet={() => setView('diet')} onBodyScan={() => setView('body-scan')} />}
+          {view === 'home' && <HomeView state={state} syncStatus={syncStatus} onSettings={() => setView('settings')} onDiet={() => setView('diet')} onBodyScan={() => setView('body-scan')} onCoach={() => setView('coach')} />}
           {view === 'body-scan' && <BodyScanView state={state} onBack={() => setView('home')} onUpdateState={setState} />}
           {view === 'log' && <IronLogView state={state} onStart={handleStart} onSettings={() => setView('settings')} onUpdateState={setState} />}
           {view === 'diet' && <DietView state={state} onBack={() => setView('home')} onUpdateState={setState} />}
+          {view === 'coach' && <CoachView state={state} onUpdateState={setState} />}
           {view === 'session' && activeDayId && <SessionView state={state} dayId={activeDayId} onComplete={handleComplete} onCancel={handleCancel} onUpdateState={setState} />}
           {view === 'complete' && completionSummary && <SessionCompleteView summary={completionSummary} onDone={handleSummaryDone} />}
           {view === 'settings' && <SettingsView state={state} syncStatus={syncStatus} onBack={() => setView('home')} onUpdateState={setState} onResync={handleResync} />}
@@ -4942,14 +5225,15 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
     // ============================================================
     const TabBar = ({ current, onChange }) => {
       const tabs = [
-        { id: 'home', label: 'Home',    icon: Home },
-        { id: 'log',  label: 'Iron Log',icon: Dumbbell },
-        { id: 'diet', label: 'Diet',    icon: Utensils },
+        { id: 'home',  label: 'Home',     icon: Home },
+        { id: 'log',   label: 'Iron Log', icon: Dumbbell },
+        { id: 'diet',  label: 'Diet',     icon: Utensils },
+        { id: 'coach', label: 'Coach',    icon: Sparkle },
       ];
       return (
         <div className="fixed bottom-0 left-0 right-0 bg-black/95 backdrop-blur border-t border-neutral-800 z-30"
              style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
-          <div className="max-w-2xl mx-auto grid grid-cols-3">
+          <div className="max-w-2xl mx-auto grid grid-cols-4">
             {tabs.map(t => {
               const Ic = t.icon;
               const active = current === t.id;
