@@ -472,6 +472,19 @@
       return 'Beginner';
     };
 
+    // English ordinal suffix: 1st, 2nd, 3rd, 4th... 11/12/13 always "th".
+    const ordSuffix = (n) => {
+      if (n == null) return '';
+      const v = Math.abs(Math.round(n));
+      const last2 = v % 100;
+      if (last2 >= 11 && last2 <= 13) return 'th';
+      const last1 = v % 10;
+      if (last1 === 1) return 'st';
+      if (last1 === 2) return 'nd';
+      if (last1 === 3) return 'rd';
+      return 'th';
+    };
+
     const nextMilestone = (value, standards) => {
       if (!value || !standards) return null;
       for (let i = 0; i < standards.length; i++) {
@@ -2326,7 +2339,7 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
           <div className="text-[11px] uppercase tracking-[0.2em] text-neutral-500 font-mono mb-1.5">TRAINING MAXES</div>
           {overall != null ? (
             <div className="flex items-baseline gap-2">
-              <div className={`font-mono text-3xl font-bold leading-none ${overallColor}`}>{overall}<span className="text-base">th</span></div>
+              <div className={`font-mono text-3xl font-bold leading-none ${overallColor}`}>{overall}<span className="text-base">{ordSuffix(overall)}</span></div>
               <div className={`text-[11px] uppercase tracking-widest font-mono font-semibold ${overallColor}`}>{percentileLabel(overall)}</div>
             </div>
           ) : (
@@ -2359,7 +2372,7 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
                   </div>
                   {pct != null && (
                     <div className="text-[10px] font-mono mb-1">
-                      <span className={`font-bold ${pctColor(pct)}`}>{pct}<span className="text-[8px]">th</span></span>
+                      <span className={`font-bold ${pctColor(pct)}`}>{pct}<span className="text-[8px]">{ordSuffix(pct)}</span></span>
                       <span className="text-neutral-600 ml-1 uppercase tracking-wider text-[9px]">{percentileLabel(pct)}</span>
                     </div>
                   )}
@@ -2368,7 +2381,7 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
                     <div className="text-[10px] text-neutral-500 font-mono">{delta}</div>
                     {next && (
                       <div className="text-[9px] text-neutral-600 font-mono uppercase tracking-wider">
-                        →{next.value} <span className="text-neutral-700">{next.pct}th</span>
+                        →{next.value} <span className="text-neutral-700">{next.pct}{ordSuffix(next.pct)}</span>
                       </div>
                     )}
                   </div>
@@ -2755,7 +2768,7 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
         const color = pctColor ? pctColor(pct) : (pct >= 75 ? 'text-green-400' : pct >= 50 ? 'text-orange-300' : pct >= 25 ? 'text-neutral-300' : 'text-red-400');
         return (
           <span className="font-mono text-sm">
-            <span className={`font-bold ${color}`}>{pct}<span className="text-[10px]">th</span></span>
+            <span className={`font-bold ${color}`}>{pct}<span className="text-[10px]">{ordSuffix(pct)}</span></span>
             <span className="text-neutral-500 ml-1 uppercase tracking-wider text-[10px]">{label}</span>
           </span>
         );
