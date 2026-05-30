@@ -3883,31 +3883,59 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
       const [editing, setEditing] = useState(null); // meal object or null
       const [topOff, setTopOff] = useState(false);
       const [reviewing, setReviewing] = useState(false);
-
       const today = todayKey();
-      const meals = (state.mealsByDate && state.mealsByDate[today]) || [];
+      const [selectedDate, setSelectedDate] = useState(today);
+
+      const isToday = selectedDate === today;
+      const meals = (state.mealsByDate && state.mealsByDate[selectedDate]) || [];
       const pace = computeWeeklyPace(state);
       const targets = computeMacroTargets(state.bodyStats, state.oura, pace, computeBodyDiag(state));
       const totals = sumMeals(meals);
       const remaining = Math.max(0, targets.kcal - totals.kcal);
 
+      const shiftDay = (delta) => {
+        const d = new Date(`${selectedDate}T12:00:00`);
+        d.setDate(d.getDate() + delta);
+        const next = dateKey(d);
+        // Don't allow future dates. Allow up to 14 days back.
+        if (next > today) return;
+        const minDate = (() => {
+          const m = new Date(); m.setDate(m.getDate() - 14); return dateKey(m);
+        })();
+        if (next < minDate) return;
+        setSelectedDate(next);
+      };
+
+      const dateLabel = (() => {
+        if (isToday) return 'Today';
+        const yest = (() => { const d = new Date(); d.setDate(d.getDate() - 1); return dateKey(d); })();
+        if (selectedDate === yest) return 'Yesterday';
+        try {
+          return new Date(`${selectedDate}T12:00:00`).toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' });
+        } catch { return selectedDate; }
+      })();
+
       const addMeal = (meal) => {
         const id = `m-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-        const entry = { id, ...meal, loggedAt: new Date().toISOString() };
+        // For past days, use noon on that day so the meal sorts in. For today, use real time.
+        const loggedAt = isToday
+          ? new Date().toISOString()
+          : new Date(`${selectedDate}T12:00:00`).toISOString();
+        const entry = { id, ...meal, loggedAt };
         const list = [...meals, entry];
-        onUpdateState({ ...state, mealsByDate: { ...(state.mealsByDate || {}), [today]: list } });
+        onUpdateState({ ...state, mealsByDate: { ...(state.mealsByDate || {}), [selectedDate]: list } });
         setAdding(false);
       };
       const saveEdit = (updated) => {
         if (!editing) return;
         const list = meals.map(m => m.id === editing.id ? { ...m, ...updated } : m);
-        onUpdateState({ ...state, mealsByDate: { ...(state.mealsByDate || {}), [today]: list } });
+        onUpdateState({ ...state, mealsByDate: { ...(state.mealsByDate || {}), [selectedDate]: list } });
         setEditing(null);
       };
       const deleteMeal = () => {
         if (!editing) return;
         const list = meals.filter(m => m.id !== editing.id);
-        onUpdateState({ ...state, mealsByDate: { ...(state.mealsByDate || {}), [today]: list } });
+        onUpdateState({ ...state, mealsByDate: { ...(state.mealsByDate || {}), [selectedDate]: list } });
         setEditing(null);
       };
 
@@ -3919,8 +3947,20 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
           <div className="flex items-center justify-between mb-4">
             <div>
               <div className="font-display text-3xl tracking-wide text-neutral-50">DIET</div>
-              <div className="text-sm text-neutral-500">
-                {new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })}
+              <div className="flex items-center gap-2 mt-1">
+                <button onClick={() => shiftDay(-1)} className="w-7 h-7 rounded border border-neutral-800 flex items-center justify-center text-neutral-400 hover:text-neutral-100 hover:border-neutral-700">
+                  <ChevronLeft size={14} />
+                </button>
+                <div className="text-sm text-neutral-300 font-mono min-w-[110px] text-center">
+                  {dateLabel}
+                </div>
+                <button onClick={() => shiftDay(1)} disabled={isToday}
+                  className={`w-7 h-7 rounded border border-neutral-800 flex items-center justify-center ${isToday ? 'text-neutral-700 cursor-not-allowed' : 'text-neutral-400 hover:text-neutral-100 hover:border-neutral-700'}`}>
+                  <ChevronRight size={14} />
+                </button>
+                {!isToday && (
+                  <button onClick={() => setSelectedDate(today)} className="text-[10px] uppercase tracking-wider text-orange-400 font-mono font-semibold ml-1">Today</button>
+                )}
               </div>
             </div>
             <div className={`text-xs uppercase tracking-[0.2em] font-mono ${modeColor}`}>
@@ -3990,7 +4030,7 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
           </button>
 
           <div className="flex items-center justify-between mb-3">
-            <div className="text-xs uppercase tracking-[0.2em] text-neutral-500 font-mono">TODAY'S MEALS</div>
+            <div className="text-xs uppercase tracking-[0.2em] text-neutral-500 font-mono">{isToday ? "TODAY'S MEALS" : `${dateLabel.toUpperCase()} · MEALS`}</div>
             <div className="text-[10px] uppercase tracking-wider text-neutral-600 font-mono">{meals.length} logged</div>
           </div>
 
