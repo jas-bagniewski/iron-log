@@ -758,7 +758,16 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
         active_7d_avg: state.oura.active_burn_7d_avg,
       } : null;
       const lastScan = (state.bodyScans || [])[0];
+      const now = new Date();
+      const hourLocal = now.getHours();
+      const fractionOfDay = Math.round(((hourLocal * 60 + now.getMinutes()) / (24 * 60)) * 100) / 100;
       return {
+        now: {
+          iso: now.toISOString(),
+          hour_local: hourLocal,
+          fraction_of_day_elapsed: fractionOfDay,
+          day_label: hourLocal < 12 ? 'morning' : hourLocal < 17 ? 'afternoon' : hourLocal < 21 ? 'evening' : 'late night',
+        },
         body: {
           weight: bs.weight,
           bf: bs.bodyFatPct,
@@ -771,12 +780,13 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
           last_scan: lastScan ? { date: lastScan.date, visual_bf: lastScan.analysis?.visual_bf_estimate } : null,
         },
         diet: {
-          today_intake: Math.round(balance.today.intake),
-          today_burn: Math.round(balance.today.burn),
-          today_projected_net: Math.round(balance.today.projectedNet),
-          seven_day_cumulative: Math.round(balance.cumulative.net),
-          days_logged: balance.cumulative.days,
-          avg_daily_net: pace.hasEnoughData ? Math.round(pace.actualDailyDelta) : null,
+          today_in_progress: true,
+          today_intake_so_far: Math.round(balance.today.intake),
+          today_burn_so_far: Math.round(balance.today.burn),
+          today_projected_net_end_of_day: Math.round(balance.today.projectedNet),
+          seven_day_cumulative_excludes_today: Math.round(balance.cumulative.net),
+          days_logged_in_last_7: balance.cumulative.days,
+          avg_daily_net_recent: pace.hasEnoughData ? Math.round(pace.actualDailyDelta) : null,
           target_daily_delta: Math.round(targets.baseKcal - targets.maintenance),
           target_kcal: targets.kcal,
           target_protein_g: targets.protein,
