@@ -933,8 +933,17 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
     });
 
     const analyzeMealPhoto = async (file) => {
-      const { data, mediaType } = await fileToBase64(file);
-      return callMealAPI({ imageBase64: data, mediaType });
+      // Compress before upload — raw iPhone photos can be 4-7 MB after base64,
+      // which hits Vercel's serverless body-size limit (413 Payload Too Large).
+      // 1024px / Q0.8 keeps food detail while landing under ~500 KB.
+      try {
+        const { data } = await compressImage(file, 1024, 0.8);
+        return callMealAPI({ imageBase64: data, mediaType: 'image/jpeg' });
+      } catch (e) {
+        // Fall back to raw upload only if compression fails.
+        const { data, mediaType } = await fileToBase64(file);
+        return callMealAPI({ imageBase64: data, mediaType });
+      }
     };
 
     const analyzeMealText = async (description) => {
