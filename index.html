@@ -936,14 +936,20 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
       // Compress before upload — raw iPhone photos can be 4-7 MB after base64,
       // which hits Vercel's serverless body-size limit (413 Payload Too Large).
       // 1024px / Q0.8 keeps food detail while landing under ~500 KB.
+      // Returns the result enriched with the compressed photo so the edit form
+      // can re-send it alongside a corrected description.
+      let photoData, photoMediaType;
       try {
-        const { data } = await compressImage(file, 1024, 0.8);
-        return callMealAPI({ imageBase64: data, mediaType: 'image/jpeg' });
+        const compressed = await compressImage(file, 1024, 0.8);
+        photoData = compressed.data;
+        photoMediaType = 'image/jpeg';
       } catch (e) {
-        // Fall back to raw upload only if compression fails.
-        const { data, mediaType } = await fileToBase64(file);
-        return callMealAPI({ imageBase64: data, mediaType });
+        const raw = await fileToBase64(file);
+        photoData = raw.data;
+        photoMediaType = raw.mediaType;
       }
+      const result = await callMealAPI({ imageBase64: photoData, mediaType: photoMediaType });
+      return { ...result, _photo: { data: photoData, mediaType: photoMediaType } };
     };
 
     const analyzeMealText = async (description) => {
@@ -3161,6 +3167,9 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
       const [estimateError, setEstimateError] = useState(null);
       const [portionConfidence, setPortionConfidence] = useState(initial?.portion_confidence || null);
       const [portionNote, setPortionNote] = useState(initial?.portion_note || null);
+      // Hang onto the photo (if any) so re-estimating with an edited name
+      // can send photo + description together — best-of-both-worlds estimate.
+      const [photo, setPhoto] = useState(initial?._photo || null);
 
       useEffect(() => {
         if (initial) {
@@ -3172,6 +3181,7 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
           setItems(initial.items || null);
           setPortionConfidence(initial.portion_confidence || null);
           setPortionNote(initial.portion_note || null);
+          setPhoto(initial._photo || null);
         }
         setQty(1);
       }, [initial]);
@@ -3200,7 +3210,12 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
         setEstimating(true);
         setEstimateError(null);
         try {
-          const result = await analyzeMealText(desc);
+          // When we have a photo, send BOTH the photo and the (likely edited)
+          // description — AI uses the description to identify the dish and the
+          // photo to estimate portion. Higher confidence than either alone.
+          const result = photo
+            ? await callMealAPI({ imageBase64: photo.data, mediaType: photo.mediaType, description: desc })
+            : await analyzeMealText(desc);
           const total = result.total || {};
           if (result.name) setName(result.name);
           setKcal(String(total.kcal || 0));
@@ -3239,6 +3254,8 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
               className="w-full mb-3 py-2.5 rounded-lg border border-dashed border-orange-500/40 text-orange-300 text-xs uppercase tracking-wider font-semibold hover:bg-orange-500/5 active:scale-[0.99] disabled:opacity-40 flex items-center justify-center gap-2">
               {estimating ? (
                 <><div className="w-3 h-3 rounded-full border-2 border-orange-500/30 border-t-orange-500 animate-spin" />Estimating…</>
+              ) : photo ? (
+                <>Re-estimate with photo + name</>
               ) : (
                 <>Estimate macros from name</>
               )}
@@ -3709,6 +3726,7 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
             items: result.items || [],
             portion_confidence: result.portion_confidence || null,
             portion_note: result.portion_note || null,
+            _photo: result._photo || null,
           });
           setMode('photo-confirm');
         } catch (e) {
