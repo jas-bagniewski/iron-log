@@ -966,7 +966,10 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
       });
       if (!r.ok) {
         const j = await r.json().catch(() => ({}));
-        throw new Error(j.error || `HTTP ${r.status}`);
+        // Surface the underlying detail (e.g. Anthropic API error body) so the
+        // user sees something actionable instead of just "anthropic error".
+        const msg = j.detail ? `${j.error || 'error'}: ${String(j.detail).slice(0, 200)}` : (j.error || `HTTP ${r.status}`);
+        throw new Error(msg);
       }
       return r.json();
     };
