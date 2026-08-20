@@ -4294,7 +4294,7 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
       return (
         <div className="px-5 pb-28 pt-6 max-w-2xl mx-auto">
           <div className="flex items-center justify-between mb-4">
-            <div className="font-display text-3xl tracking-wide text-neutral-50">IRON LOG</div>
+            <div className="font-display text-3xl tracking-wide text-neutral-50">IRON LOG <span className="text-[9px] font-mono text-neutral-600 tracking-normal align-top">v3</span></div>
             <div className="text-[10px] uppercase tracking-[0.2em] font-mono text-neutral-500">
               C{state.cycle}·W{state.week} · {WEEK_SCHEMES[state.week].label}
             </div>
@@ -5203,6 +5203,10 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
             setState((prev) => applyTMRecalibration({
             ...prev,
             ...cloud,
+            // The recal flag must track the CLOUD copy: cloud TMs override
+            // local ones below, so a locally-set flag over cloud's old TMs
+            // would silently defuse the migration.
+            tmRecal20260820: cloud.tmRecal20260820 || false,
             activeSession: cloud.activeSession ?? prev.activeSession,
             // Preserve the seeded default snack preferences if cloud's is empty.
             snackPreferences: (cloud.snackPreferences && cloud.snackPreferences.trim()) ? cloud.snackPreferences : (prev.snackPreferences || DEFAULT_SNACK_PREFERENCES),
@@ -5358,9 +5362,10 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
         if (status === 'unauthorized') { setSyncStatus('unauthorized'); return; }
         if (status === 'error') { setSyncStatus('error'); return; }
         if (cloud) {
-          setState((prev) => ({
+          setState((prev) => applyTMRecalibration({
             ...prev,
             ...cloud,
+            tmRecal20260820: cloud.tmRecal20260820 || false,
             activeSession: cloud.activeSession ?? prev.activeSession,
             // Preserve the seeded default snack preferences if cloud's is empty.
             snackPreferences: (cloud.snackPreferences && cloud.snackPreferences.trim()) ? cloud.snackPreferences : (prev.snackPreferences || DEFAULT_SNACK_PREFERENCES),
