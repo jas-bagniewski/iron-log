@@ -60,3 +60,5 @@ Edits land via PR, the workflow re-attributes the commit so your Vercel Hobby de
 ## License
 
 MIT. Fork it, change it, ship it.
+
+<!-- redeploy 2026-08-20: apply rotated SYNC_SECRET -->
