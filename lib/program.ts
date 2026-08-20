@@ -83,9 +83,10 @@ export const ACCESSORIES: Record<string, AccessoryDef> = {
 export type DayTemplate = {
   id: string;
   name: string;
-  mainLift: "bench" | "squat" | "deadlift";
+  mainLift: "bench" | "squat" | "deadlift" | "press";
   mainName: string;
   isVolume: boolean;
+  supplementary?: { lift: "bench" | "squat" | "deadlift" | "press"; name: string; pct: number; deloadPct?: number; sets: number; deloadSets?: number; reps: number; deloadReps?: number };
   accessories: string[];
 };
 
@@ -250,22 +251,47 @@ export const finishSession = (state: AppState, completed: Session): AppState => 
   let { cycle, week, trainingMaxes } = state;
   let newDone = done;
 
+  const completedEntry = { ...completed, completedAt: new Date().toISOString() };
+  const allEntries = [completedEntry, ...(state.history || [])];
+
   if (Object.values(done).every((v) => v)) {
     newDone = { chest: false, fullbody: false, legs: false, back: false };
     if (week === 4) {
       week = 1;
       cycle += 1;
-      trainingMaxes = {
-        bench: trainingMaxes.bench + 5,
-        squat: trainingMaxes.squat + 10,
-        deadlift: trainingMaxes.deadlift + 10,
-      };
+      // Conditional per-lift TM progression, judged on this cycle's PR-week
+      // (week 3) AMRAP: hit the min reps -> bump (+5 upper, +10 lower);
+      // failed the single -> reset to 90% of the cycle's best e1RM;
+      // no PR session -> hold. Mirrors index.html (authoritative).
+      const endedCycle = state.cycle;
+      const nextTMs = { ...trainingMaxes };
+      (["bench", "press", "squat", "deadlift"] as const).forEach((lift) => {
+        const from = trainingMaxes[lift] || defaultState.trainingMaxes[lift];
+        const bump = lift === "bench" || lift === "press" ? 5 : 10;
+        const cycleSessions = allEntries.filter((h) => h.mainLift === lift && !h.isVolume && h.cycle === endedCycle);
+        const prSession = cycleSessions.find((h) => h.week === 3);
+        const prAmrap = prSession && (prSession.mainSets || []).find((s) => s.isAmrap && s.actualReps != null);
+        if (!prAmrap) return; // hold
+        if ((prAmrap.actualReps as number) >= (prAmrap.minReps || 1)) {
+          nextTMs[lift] = from + bump;
+        } else {
+          let best = 0;
+          cycleSessions.forEach((h) => (h.mainSets || []).forEach((s) => {
+            if (s.isAmrap && s.actualReps && s.actualReps > 0 && s.weight) {
+              const e = Math.round(s.weight * (1 + s.actualReps / 30));
+              if (e > best) best = e;
+            }
+          }));
+          nextTMs[lift] = round5((best || from) * 0.9);
+        }
+      });
+      trainingMaxes = nextTMs;
     } else {
       week += 1;
     }
   }
 
-  const newHistory = [{ ...completed, completedAt: new Date().toISOString() }, ...(state.history || [])].slice(0, 200);
+  const newHistory = allEntries.slice(0, 200);
 
   return {
     ...state,

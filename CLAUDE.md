@@ -42,7 +42,8 @@ Static single-page app. `index.html` boots React 18 via UMD CDN, Tailwind via CD
 
 - 4-week wave: 5s, 3s, PR (5/3/1+), Deload.
 - Each main lift session has 3 sets; last set is AMRAP (As Many Reps As Possible) except in deload.
-- Training maxes auto-bump after a full 4-week cycle: +5 lb bench, +10 lb squat/deadlift.
+- Training maxes progress conditionally at the end of each 4-week cycle, judged per lift on the PR-week (week 3) AMRAP: hit the min reps → bump (+5 lb bench/press, +10 lb squat/deadlift); failed the single → reset TM to 90% of that cycle's best e1RM; skipped PR week → hold. Unconditional bumps (and the old mid-cycle "smart bump") were removed 2026-08-20 after they let bench/press TMs overrun the lifter.
+- One-time TM recalibration shipped 2026-08-20 (`applyTMRecalibration` in index.html): bench 255→225, press 140→120, guarded by a synced `tmRecal20260820` flag + exact-value match.
 - Accessories use double progression: hit top of rep range on ALL sets → next session shows "+X lb" hint.
 
 ## Days
