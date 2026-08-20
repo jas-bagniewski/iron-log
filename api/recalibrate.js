@@ -43,14 +43,14 @@ export default async function handler(req, res) {
     const state = await kvGet(url, kvToken);
     if (!state || !state.shareToken || state.shareToken !== token) return res.status(404).json({ error: "not found" });
 
-    if (state.tmRecal20260820) {
-      return res.status(200).json({ applied: false, reason: "already applied", trainingMaxes: state.trainingMaxes });
-    }
+    // The exact-value match is the real guard. The flag alone is NOT trusted:
+    // the pre-#76 client bug set the flag while keeping the old TMs (cloud
+    // values overrode the migrated local ones), leaving KV in a poisoned
+    // "flag true + bench 255/press 140" state that this repairs.
     const tms = state.trainingMaxes;
     if (!tms || tms.bench !== 255 || tms.press !== 140) {
-      const next = { ...state, tmRecal20260820: true };
-      await kvSet(url, kvToken, next);
-      return res.status(200).json({ applied: false, reason: "values changed manually; flag set", trainingMaxes: tms });
+      if (!state.tmRecal20260820) await kvSet(url, kvToken, { ...state, tmRecal20260820: true });
+      return res.status(200).json({ applied: false, reason: "TMs are not the known-bad values; nothing to fix", trainingMaxes: tms });
     }
     const nextTMs = { ...tms, bench: 225, press: 120 };
     const next = {
