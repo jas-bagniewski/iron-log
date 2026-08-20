@@ -4816,10 +4816,14 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
             withingsLeanMassKg: j.lean_mass_kg,
             withingsFatMassKg: j.fat_mass_kg,
           };
-          const history = [
-            { date: todayKey(), weight: nextBs.weight, bodyFatPct: nextBs.bodyFatPct, source: 'withings' },
-            ...(state.bodyStatsHistory || []),
-          ].slice(0, 365);
+          // Same duplicate guard as the auto-sync: only a NEW measurement
+          // earns a history entry, dated by measurement time.
+          const isNewMeasurement = j.measured_at != null && j.measured_at !== bs.withingsLastMeasuredAt;
+          const measuredDate = j.measured_at ? new Date(j.measured_at).toISOString().slice(0, 10) : todayKey();
+          const history = isNewMeasurement ? [
+            { date: measuredDate, weight: nextBs.weight, bodyFatPct: nextBs.bodyFatPct, source: 'withings' },
+            ...(state.bodyStatsHistory || []).filter(e => e.date !== measuredDate),
+          ].slice(0, 365) : (state.bodyStatsHistory || []);
           onUpdateState({ ...state, bodyStats: nextBs, bodyStatsHistory: history });
           setSyncMsg(`Synced · measured ${formatRelative(j.measured_at) || 'recently'}`);
         } catch (e) {
@@ -5257,6 +5261,13 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
             if (!j || j.weight_lb == null) return;
             setState(prev => {
               if (!prev) return prev;
+              // Only record a history entry for a genuinely NEW measurement.
+              // Re-syncing a stale reading used to append it again under
+              // today's date, polluting the trend fit with duplicates
+              // (three copies of one weigh-in manufactured a fake rising-BF
+              // trend in Aug 2026).
+              const isNewMeasurement = j.measured_at != null && j.measured_at !== prev.bodyStats?.withingsLastMeasuredAt;
+              const measuredDate = j.measured_at ? new Date(j.measured_at).toISOString().slice(0, 10) : todayKey();
               const nextBs = {
                 ...prev.bodyStats,
                 weight: j.weight_lb,
@@ -5267,10 +5278,10 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
                 withingsLeanMassKg: j.lean_mass_kg,
                 withingsFatMassKg: j.fat_mass_kg,
               };
-              const history = [
-                { date: todayKey(), weight: nextBs.weight, bodyFatPct: nextBs.bodyFatPct, source: 'withings-auto' },
-                ...(prev.bodyStatsHistory || []),
-              ].slice(0, 365);
+              const history = isNewMeasurement ? [
+                { date: measuredDate, weight: nextBs.weight, bodyFatPct: nextBs.bodyFatPct, source: 'withings-auto' },
+                ...(prev.bodyStatsHistory || []).filter(e => e.date !== measuredDate),
+              ].slice(0, 365) : (prev.bodyStatsHistory || []);
               return { ...prev, bodyStats: nextBs, bodyStatsHistory: history };
             });
           })
