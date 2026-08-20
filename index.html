@@ -199,7 +199,12 @@
     const buildSupplementary = (sup, state) => {
       if (!sup) return null;
       const isDeload = state.week === 4;
-      const pct = isDeload ? (sup.deloadPct ?? sup.pct) : sup.pct;
+      // BBB volume auto-progression: 60% -> 65% -> 70% across cycles, then
+      // back down after the TM bumps make 60% heavier in absolute terms.
+      // Anchored at cycle 4 (post TM recalibration, 2026-08-20).
+      const bbbStep = ((state.cycle - 4) % 3 + 3) % 3;
+      const basePct = sup.pct + 0.05 * bbbStep;
+      const pct = isDeload ? (sup.deloadPct ?? sup.pct) : basePct;
       const count = isDeload ? (sup.deloadSets ?? sup.sets) : sup.sets;
       const reps = isDeload ? (sup.deloadReps ?? sup.reps) : sup.reps;
       const supTm = state.trainingMaxes[sup.lift];
@@ -4284,6 +4289,7 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
 
       const history = state.history || [];
       const filtered = historyFilter === 'all' ? history : history.filter(s => s.dayId === historyFilter);
+      const trainedToday = history.some((h) => h.completedAt && new Date(h.completedAt).toDateString() === new Date().toDateString());
 
       return (
         <div className="px-5 pb-28 pt-6 max-w-2xl mx-auto">
@@ -4305,6 +4311,12 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
 
           {sub === 'train' && (
             <>
+              {trainedToday && (
+                <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-3 mb-4 text-xs text-amber-200/90">
+                  <span className="font-bold uppercase tracking-wider text-amber-400 mr-1">Already trained today.</span>
+                  Stacking a second main lift on the same day reliably costs reps on the second session. Unless you're catching up after time off, come back tomorrow.
+                </div>
+              )}
               <div className="text-xs uppercase tracking-[0.2em] text-neutral-500 font-mono mb-3">THIS WEEK</div>
               <div className="grid grid-cols-2 gap-3 mb-4">
                 {DAY_ORDER.map(dayId => {

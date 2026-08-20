@@ -178,6 +178,8 @@ export const defaultState: AppState = {
 export const buildMainSets = (tm: number, week: number, isVolume: boolean): MainSet[] => {
   if (isVolume) {
     // BBB supplementary: 5x10 at 60% TM; deload week drops to 3x5 at 50%.
+    // NOTE: index.html (authoritative) auto-progresses BBB 60/65/70% by cycle
+    // ((cycle - 4) % 3) via buildSupplementary; this legacy path stays at 60%.
     const isDeload = week === 4;
     const pct = isDeload ? 0.50 : 0.60;
     const count = isDeload ? 3 : 5;
