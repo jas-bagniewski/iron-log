@@ -56,6 +56,7 @@ export type AccessoryDef = {
   retired?: boolean; // no longer in any day template; kept for history
 };
 
+// ---- Accessories + day templates (mirrored from index.html) ----
 export const ACCESSORIES: Record<string, AccessoryDef> = {
   // Bench day
   'incline-db':       { name: 'Incline Dumbbell Press', sets: 3, repsLow: 8,  repsHigh: 10, inc: 5,  startWeight: 50 },
@@ -82,16 +83,20 @@ export const ACCESSORIES: Record<string, AccessoryDef> = {
   'leg-press':        { name: 'Leg Press',              sets: 3, repsLow: 10, repsHigh: 12, inc: 10, startWeight: 200, retired: true },
   'leg-curls':        { name: 'Lying Leg Curls',        sets: 3, repsLow: 10, repsHigh: 12, inc: 5,  startWeight: 80, retired: true },
   'calf-raises':      { name: 'Standing Calf Raises',   sets: 3, repsLow: 12, repsHigh: 15, inc: 10, startWeight: 100, retired: true },
-  'leg-raises':       { name: 'Hanging Leg Raises',     sets: 3, repsLow: 10, repsHigh: 15, inc: 0,  startWeight: 0, isBodyweight: true, retired: true },
-  'lat-pulldown-back':{ name: 'Lat Pulldown',           sets: 3, repsLow: 10, repsHigh: 12, inc: 5,  startWeight: 120, retired: true },
-  'bicep-curls':      { name: 'Dumbbell Bicep Curls',   sets: 3, repsLow: 10, repsHigh: 12, inc: 5,  startWeight: 25, retired: true },
+  'leg-raises':       { name: 'Hanging Leg Raises',     sets: 3, repsLow: 10, repsHigh: 15, inc: 0,  startWeight: 0, isBodyweight: true },
+  'lat-pulldown-back':{ name: 'Lat Pulldown (Tonal)',   sets: 3, repsLow: 10, repsHigh: 12, inc: 5,  startWeight: 120 },
+  'bicep-curls':      { name: 'Dumbbell Bicep Curls',   sets: 3, repsLow: 10, repsHigh: 12, inc: 5,  startWeight: 25 },
 };
 
-// ---- Day templates ----
 // supplementary.type:
 //   'fsl' — First Set Last: N x reps at the week's first-set % of the
 //           day's own TM. Skipped on deload week.
 //   'bbb' (default) — fixed-% volume block on another lift's TM.
+//
+// Session budget is SETS, not exercises: ~20 working sets fits 60 min when
+// accessories run as pairs (A1/A2, B1/B2 — see SessionView). Keep each
+// day at or under SET_BUDGET; estimateMinutes() shows the time on screen.
+export const SET_BUDGET = 22;
 export type DayTemplate = {
   id: string;
   name: string;
@@ -106,26 +111,34 @@ export const DAY_TEMPLATES: Record<string, DayTemplate> = {
   chest: {
     id: 'chest', name: 'Bench Day', mainLift: 'bench', mainName: 'Bench Press', isVolume: false,
     supplementary: { type: 'fsl', lift: 'bench', name: 'Bench Press (FSL 5×5)', sets: 5, reps: 5 },
-    accessories: ['incline-db', 'tonal-row-1arm', 'tricep-ext-tonal'],
+    accessories: ['incline-db', 'tonal-row-1arm', 'tricep-ext-tonal', 'face-pulls'],
   },
   legs: {
     id: 'legs', name: 'Squat Day', mainLift: 'squat', mainName: 'Back Squat', isVolume: false,
     supplementary: { type: 'fsl', lift: 'squat', name: 'Back Squat (FSL 5×5)', sets: 5, reps: 5 },
-    accessories: ['hip-thrust', 'goblet-squat', 'sl-calf-raise'],
+    accessories: ['hip-thrust', 'goblet-squat', 'sl-calf-raise', 'leg-raises'],
   },
   back: {
     id: 'back', name: 'Deadlift Day', mainLift: 'deadlift', mainName: 'Hex Bar Deadlift', isVolume: false,
     supplementary: { type: 'fsl', lift: 'deadlift', name: 'Hex Bar Deadlift (FSL 3×5)', sets: 3, reps: 5 },
-    accessories: ['romanian-dl', 'pull-ups', 'pallof-tonal'],
+    accessories: ['romanian-dl', 'pull-ups', 'pallof-tonal', 'bicep-curls'],
   },
   // Press day keeps the bench BBB block: bench gets a second exposure.
   fullbody: {
     id: 'fullbody', name: 'Press Day', mainLift: 'press', mainName: 'Military Press', isVolume: false,
     supplementary: { type: 'bbb', lift: 'bench', name: 'Bench Press (BBB)', pct: 0.60, deloadPct: 0.50, sets: 5, deloadSets: 3, reps: 10, deloadReps: 5 },
-    accessories: ['barbell-rows', 'face-pulls', 'lateral-raise-tonal'],
+    accessories: ['barbell-rows', 'lat-pulldown-back', 'lateral-raise-tonal'],
   },
 };
-// Weekly order: Mon bench, Tue squat, Thu deadlift, Fri press.
+export const supSetCount = (sup: DayTemplate["supplementary"], week: number) => !sup ? 0 : week === 4 ? (sup.type === 'fsl' ? 0 : (sup.deloadSets ?? sup.sets)) : sup.sets;
+export const accSetCount = (tpl: DayTemplate) => tpl.accessories.reduce((a, id) => a + (ACCESSORIES[id] ? ACCESSORIES[id].sets : 0), 0);
+export const daySetCount = (tpl: DayTemplate, week: number) => 3 + supSetCount(tpl.supplementary, week) + accSetCount(tpl);
+// ~15 min warm-up + 3 main sets, volume sets 2.5-3 min, paired accessory sets ~2 min.
+export const estimateMinutes = (tpl: DayTemplate, week: number) => {
+  const sup = tpl.supplementary;
+  const supMin = supSetCount(sup, week) * (sup && sup.type === 'bbb' ? 3 : 2.5);
+  return Math.round((15 + supMin + accSetCount(tpl) * 2) / 5) * 5;
+};
 export const DAY_ORDER = ["chest", "legs", "back", "fullbody"] as const;
 
 // ============================================================
