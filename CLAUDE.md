@@ -46,16 +46,27 @@ Static single-page app. `index.html` boots React 18 via UMD CDN, Tailwind via CD
 - One-time TM recalibration shipped 2026-08-20 (`applyTMRecalibration` in index.html): bench 255→225, press 140→120, guarded by a synced `tmRecal20260820` flag + exact-value match.
 - Accessories use double progression: hit top of rep range on ALL sets → next session shows "+X lb" hint.
 
-## Days
+## Days (program v4, 2026-11-20 — home gym rebuild)
 
-- **Chest Day** — Bench (main) + incline DB press, close-grip bench, Tonal tricep extension, Tonal decline fly
-- **Full Body Day** — Bench (volume 5×5 at 60%) + goblet squat, lat pulldown, DB OHP, plank
-- **Leg Day** — Squat (main) + RDL, leg press, leg curls, calf raises, hanging leg raises
-- **Back Day** — Deadlift (main, hex bar) + pull-ups, barbell rows, lat pulldown, face pulls, DB curls
+Equipment: half rack with pull-up bar, 2 benches, 45 lb bar, 35 lb bar, 25 lb hex bar, curl bar, plenty of plates, DBs 5–75, Tonal, NordicTrack Ultra 1 reformer, Peloton Tread+. No leg press / leg curl machines. Avoid split squats (knee history).
+
+Lift days (≤60 min each: 5/3/1 main + one volume block + 3 accessories). Day ids kept from v3 so state/history keep working:
+- **Bench Day** (`chest`, Mon) — Bench 5/3/1 + Bench FSL 5×5 + incline DB press, Tonal single-arm row, Tonal triceps
+- **Squat Day** (`legs`, Tue) — Squat 5/3/1 + Squat FSL 5×5 + barbell hip thrust, goblet squat (3s pause), single-leg DB calf raise
+- **Deadlift Day** (`back`, Thu) — Hex bar 5/3/1 + FSL 3×5 + RDL, pull-ups ×4, Tonal Pallof press
+- **Press Day** (`fullbody`, Fri) — Press 5/3/1 + Bench BBB 5×10 + barbell rows, Tonal face pulls, Tonal lateral raise
+
+FSL ("First Set Last") = sets at the week's first-set % of that lift's TM; skipped on deload.
+
+Runs + Pilates (`CARDIO_SLOTS`, `WEEK_PLAN`, `prescribeCardio` in index.html), calendar weeks Mon–Sun, logged in `state.cardioLog`:
+- Mon easy 4 mi · Tue Pilates (core, glutes, low back) · Wed quality run (tempo / intervals / progression / strides, rotates with the 5/3/1 week) · Thu optional easy 3 mi · Fri Pilates (hamstrings, hips, flexibility) · Sat long run · Sun rest
+- Long run = last week's long run + 1 mi, capped at 13; ~75% on lifting deload week. At 13, the last 2 mi go to 8:30 pace.
+- Goal: half marathon at 8:00/mi. Strength is the priority. Paces are shown with Tread mph.
+- Logging is manual for now. Planned: Strava sync (Peloton → Strava, phone GPS outdoors). iFit/Ultra 1 has no public API.
 
 ## Data shape
 
-See `AppState` type in `lib/program.ts`. Workouts in `history`, weekly progress in `completedThisWeek`, accessory weight memory in `accessoryLog`, PT share token in `shareToken`.
+See `AppState` type in `lib/program.ts`. Workouts in `history`, weekly progress in `completedThisWeek`, runs + Pilates in `cardioLog`, accessory weight memory in `accessoryLog`, PT share token in `shareToken`.
 
 ## Deployment
 
