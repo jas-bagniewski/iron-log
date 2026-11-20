@@ -167,37 +167,51 @@
       'leg-press':        { name: 'Leg Press',              sets: 3, repsLow: 10, repsHigh: 12, inc: 10, startWeight: 200, retired: true },
       'leg-curls':        { name: 'Lying Leg Curls',        sets: 3, repsLow: 10, repsHigh: 12, inc: 5,  startWeight: 80, retired: true },
       'calf-raises':      { name: 'Standing Calf Raises',   sets: 3, repsLow: 12, repsHigh: 15, inc: 10, startWeight: 100, retired: true },
-      'leg-raises':       { name: 'Hanging Leg Raises',     sets: 3, repsLow: 10, repsHigh: 15, inc: 0,  startWeight: 0, isBodyweight: true, retired: true },
-      'lat-pulldown-back':{ name: 'Lat Pulldown',           sets: 3, repsLow: 10, repsHigh: 12, inc: 5,  startWeight: 120, retired: true },
-      'bicep-curls':      { name: 'Dumbbell Bicep Curls',   sets: 3, repsLow: 10, repsHigh: 12, inc: 5,  startWeight: 25, retired: true },
+      'leg-raises':       { name: 'Hanging Leg Raises',     sets: 3, repsLow: 10, repsHigh: 15, inc: 0,  startWeight: 0, isBodyweight: true },
+      'lat-pulldown-back':{ name: 'Lat Pulldown (Tonal)',   sets: 3, repsLow: 10, repsHigh: 12, inc: 5,  startWeight: 120 },
+      'bicep-curls':      { name: 'Dumbbell Bicep Curls',   sets: 3, repsLow: 10, repsHigh: 12, inc: 5,  startWeight: 25 },
     };
 
     // supplementary.type:
     //   'fsl' — First Set Last: N x reps at the week's first-set % of the
     //           day's own TM. Skipped on deload week.
     //   'bbb' (default) — fixed-% volume block on another lift's TM.
+    //
+    // Session budget is SETS, not exercises: ~20 working sets fits 60 min when
+    // accessories run as pairs (A1/A2, B1/B2 — see SessionView). Keep each
+    // day at or under SET_BUDGET; estimateMinutes() shows the time on screen.
+    const SET_BUDGET = 22;
     const DAY_TEMPLATES = {
       chest: {
         id: 'chest', name: 'Bench Day', mainLift: 'bench', mainName: 'Bench Press', isVolume: false,
         supplementary: { type: 'fsl', lift: 'bench', name: 'Bench Press (FSL 5×5)', sets: 5, reps: 5 },
-        accessories: ['incline-db', 'tonal-row-1arm', 'tricep-ext-tonal'],
+        accessories: ['incline-db', 'tonal-row-1arm', 'tricep-ext-tonal', 'face-pulls'],
       },
       legs: {
         id: 'legs', name: 'Squat Day', mainLift: 'squat', mainName: 'Back Squat', isVolume: false,
         supplementary: { type: 'fsl', lift: 'squat', name: 'Back Squat (FSL 5×5)', sets: 5, reps: 5 },
-        accessories: ['hip-thrust', 'goblet-squat', 'sl-calf-raise'],
+        accessories: ['hip-thrust', 'goblet-squat', 'sl-calf-raise', 'leg-raises'],
       },
       back: {
         id: 'back', name: 'Deadlift Day', mainLift: 'deadlift', mainName: 'Hex Bar Deadlift', isVolume: false,
         supplementary: { type: 'fsl', lift: 'deadlift', name: 'Hex Bar Deadlift (FSL 3×5)', sets: 3, reps: 5 },
-        accessories: ['romanian-dl', 'pull-ups', 'pallof-tonal'],
+        accessories: ['romanian-dl', 'pull-ups', 'pallof-tonal', 'bicep-curls'],
       },
       // Press day keeps the bench BBB block: bench gets a second exposure.
       fullbody: {
         id: 'fullbody', name: 'Press Day', mainLift: 'press', mainName: 'Military Press', isVolume: false,
         supplementary: { type: 'bbb', lift: 'bench', name: 'Bench Press (BBB)', pct: 0.60, deloadPct: 0.50, sets: 5, deloadSets: 3, reps: 10, deloadReps: 5 },
-        accessories: ['barbell-rows', 'face-pulls', 'lateral-raise-tonal'],
+        accessories: ['barbell-rows', 'lat-pulldown-back', 'lateral-raise-tonal'],
       },
+    };
+    const supSetCount = (sup, week) => !sup ? 0 : week === 4 ? (sup.type === 'fsl' ? 0 : (sup.deloadSets ?? sup.sets)) : sup.sets;
+    const accSetCount = (tpl) => tpl.accessories.reduce((a, id) => a + (ACCESSORIES[id] ? ACCESSORIES[id].sets : 0), 0);
+    const daySetCount = (tpl, week) => 3 + supSetCount(tpl.supplementary, week) + accSetCount(tpl);
+    // ~15 min warm-up + 3 main sets, volume sets 2.5-3 min, paired accessory sets ~2 min.
+    const estimateMinutes = (tpl, week) => {
+      const sup = tpl.supplementary;
+      const supMin = supSetCount(sup, week) * (sup && sup.type === 'bbb' ? 3 : 2.5);
+      return Math.round((15 + supMin + accSetCount(tpl) * 2) / 5) * 5;
     };
     // Weekly order: Mon bench, Tue squat, Thu deadlift, Fri press.
     const DAY_ORDER = ['chest', 'legs', 'back', 'fullbody'];
@@ -1433,7 +1447,7 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
     // ============================================================
     // ACCESSORY CARD
     // ============================================================
-    const AccessoryCard = ({ ex, onUpdate }) => {
+    const AccessoryCard = ({ ex, onUpdate, tag }) => {
       const [promptIdx, setPromptIdx] = useState(null);
 
       const adjustWeight = (d) => {
@@ -1456,11 +1470,13 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
       const repLabel = ex.isTimed ? `${ex.repsLow}-${ex.repsHigh} seconds` : `${ex.repsLow}-${ex.repsHigh} reps`;
 
       return (
-        <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-4">
+        <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-4">
           <div className="flex items-start justify-between mb-3 gap-3">
             <div className="min-w-0">
-              <div className="text-base font-bold text-neutral-50 tracking-tight">{ex.name}</div>
-              <div className="text-xs uppercase tracking-wider text-neutral-500 font-mono mt-0.5">
+              <div className="text-[16px] font-semibold text-neutral-50 tracking-tight">
+                {tag && <span className="text-neutral-500 font-mono text-[13px] mr-1.5">{tag}</span>}{ex.name}
+              </div>
+              <div className="text-[13px] text-neutral-500 mt-0.5">
                 {ex.sets} sets × {repLabel}
               </div>
             </div>
@@ -1491,7 +1507,7 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
             </div>
           )}
 
-          <div className="grid grid-cols-3 gap-2">
+          <div className={`grid gap-2 ${ex.setData.length >= 4 ? 'grid-cols-4' : 'grid-cols-3'}`}>
             {ex.setData.map((set, i) => (
               <button key={set.id} onClick={() => toggleSet(i)}
                 className={`py-3 rounded-lg border transition-all flex flex-col items-center justify-center gap-0.5 active:scale-[0.97] ${
@@ -2968,57 +2984,6 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
       );
     };
 
-    const HomeView = ({ state, syncStatus, onSettings, onDiet, onBodyScan, onCoach }) => {
-      return (
-        <div className="px-5 pb-28 pt-8 max-w-2xl mx-auto">
-          <div className="flex items-center justify-between mb-6">
-            <div className="flex items-center gap-2.5">
-              <div className="w-10 h-10 bg-orange-500 rounded-lg flex items-center justify-center">
-                <Dumbbell size={22} strokeWidth={2.5} className="text-black" />
-              </div>
-              <div>
-                <div className="font-display text-2xl tracking-wider leading-none">IRON LOG</div>
-                <div className="text-[10px] uppercase tracking-widest text-neutral-500 font-mono mt-1">
-                  CYCLE {state.cycle} · WEEK {state.week} · {WEEK_SCHEMES[state.week].label}
-                </div>
-              </div>
-            </div>
-            <div className="flex gap-2 items-center">
-              <SyncBadge status={syncStatus} />
-              <button onClick={onSettings} className="w-10 h-10 rounded-lg border border-neutral-800 flex items-center justify-center text-neutral-400 hover:text-neutral-100 hover:border-neutral-700">
-                <Settings size={18} />
-              </button>
-            </div>
-          </div>
-
-          {(() => {
-            const today = todayKey();
-            const summary = state.dailyCoachSummary && state.dailyCoachSummary.date === today ? state.dailyCoachSummary.summary : null;
-            const headline = summary && (summary.verdict || summary.headline);
-            return (
-              <button onClick={onCoach} className="w-full text-left bg-gradient-to-br from-neutral-950 to-neutral-900 border border-neutral-800 rounded-xl p-3 mb-3 hover:border-orange-500/40 active:scale-[0.99] flex items-center gap-3">
-                <div className="w-9 h-9 rounded-lg bg-orange-500/10 border border-orange-500/30 flex items-center justify-center shrink-0">
-                  <Sparkle size={16} className="text-orange-400" />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div className="text-[10px] uppercase tracking-[0.2em] text-neutral-500 font-mono mb-0.5">COACH</div>
-                  <div className="text-[13px] text-neutral-200 leading-snug truncate">
-                    {headline || "Tap to chat or get today's status digest"}
-                  </div>
-                </div>
-                <ChevronRight size={16} className="text-neutral-600 shrink-0" />
-              </button>
-            );
-          })()}
-          <TodayDietTile state={state} onOpenDiet={onDiet} />
-          <CalorieBalanceCard state={state} onOpenDiet={onDiet} />
-          <BodyCompositionCard state={state} onOpenSettings={onSettings} onOpenBodyScan={onBodyScan} />
-          <StrengthEvolutionCard state={state} />
-          <RecoveryCard state={state} onOpenSettings={onSettings} />
-        </div>
-      );
-    };
-
     // ============================================================
     // SESSION COMPLETE VIEW (post-finish coaching summary)
     // ============================================================
@@ -3295,34 +3260,33 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
 
       return (
         <div className="px-5 pb-32 pt-6 max-w-2xl mx-auto">
-          <div className="flex items-center justify-between mb-6">
-            <button onClick={onCancel} className="flex items-center gap-1 text-neutral-400 hover:text-neutral-100 text-sm uppercase tracking-wider">
-              <ChevronLeft size={18} /> Back
-            </button>
-            <div className="text-xs uppercase tracking-[0.2em] font-mono text-neutral-500">
-              C{session.cycle} · W{session.week} · {session.weekLabel}
+          <div className="sticky top-0 z-20 -mx-5 px-5 pt-1 pb-4 bg-black/90 backdrop-blur">
+            <div className="flex items-center justify-between mb-3">
+              <button onClick={onCancel} className="flex items-center gap-1 text-neutral-400 text-[14px]">
+                <ChevronLeft size={18} /> Today
+              </button>
+              <div className="text-[12px] text-neutral-500">Cycle {session.cycle} · {session.weekLabel.toLowerCase()}</div>
             </div>
-          </div>
-
-          <div className="font-display text-4xl tracking-wide text-neutral-50 mb-1">{session.name.toUpperCase()}</div>
-          <div className="text-sm text-neutral-500 mb-6">
-            {session.isVolume ? 'Volume bench + supporting lifts' : 'Main lift + accessories'}
-          </div>
-
-          <div className="mb-6">
-            <div className="flex justify-between text-xs font-mono text-neutral-500 mb-2">
-              <span>{totalDone}/{totalSets} SETS</span><span>{Math.round(progress)}%</span>
+            <div className="flex items-end justify-between gap-3 mb-3">
+              <div>
+                <DiscChip d="strength" />
+                <div className="font-display text-[32px] leading-none tracking-wide text-neutral-50 mt-1.5">{session.name}</div>
+              </div>
+              <div className="text-right shrink-0">
+                <div className="font-mono text-[15px] text-neutral-100">{totalDone}<span className="text-neutral-600">/{totalSets} sets</span></div>
+                <div className="text-[12px] text-neutral-500">~{DAY_TEMPLATES[session.dayId] ? estimateMinutes(DAY_TEMPLATES[session.dayId], session.week) : 60} min</div>
+              </div>
             </div>
-            <div className="h-1.5 bg-neutral-900 rounded-full overflow-hidden">
+            <div className="h-1 bg-neutral-900 rounded-full overflow-hidden">
               <div className="h-full bg-orange-500 transition-all duration-300" style={{ width: `${progress}%` }} />
             </div>
           </div>
 
-          <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-4 md:p-5 mb-4">
+          <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-4 md:p-5 mb-4 mt-2">
             <div className="mb-4">
-              <div className="text-[10px] uppercase tracking-widest text-orange-400 font-semibold mb-1">MAIN LIFT</div>
-              <div className="text-xl font-bold text-neutral-50 tracking-tight">{session.mainName}</div>
-              {session.isVolume && <div className="text-xs text-neutral-500 mt-1">Lighter weight, focus on speed and form</div>}
+              <div className="text-[12px] font-medium text-orange-400 mb-1">1 · Main lift</div>
+              <div className="text-[20px] font-semibold text-neutral-50 tracking-tight">{session.mainName}</div>
+              <div className="text-[13px] text-neutral-500 mt-1">{session.week === 4 ? 'Deload: smooth, easy reps.' : 'Last set: as many good reps as you can. Stop one short of a grind.'}</div>
             </div>
             <div className="space-y-2">
               {session.mainSets.map((set, i) => (
@@ -3335,11 +3299,11 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
           </div>
 
           {session.supplementary && (
-            <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-4 md:p-5 mb-4">
+            <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-4 md:p-5 mb-4">
               <div className="mb-4">
-                <div className="text-[10px] uppercase tracking-widest text-orange-400 font-semibold mb-1">SUPPLEMENTARY</div>
-                <div className="text-xl font-bold text-neutral-50 tracking-tight">{session.supplementary.name}</div>
-                <div className="text-xs text-neutral-500 mt-1">{session.supplementary.type === 'fsl' ? 'First Set Last — repeat the first working weight. Crisp reps, no grinding.' : 'Boring But Big volume work — submaximal weight, no AMRAP.'}</div>
+                <div className="text-[12px] font-medium text-orange-400 mb-1">2 · Volume</div>
+                <div className="text-[20px] font-semibold text-neutral-50 tracking-tight">{session.supplementary.name}</div>
+                <div className="text-[13px] text-neutral-500 mt-1">{session.supplementary.type === 'fsl' ? 'Repeat your first working weight. Crisp reps, about 2 min rest.' : 'Lighter bench volume. Steady pace, about 90 s rest.'}</div>
               </div>
               <div className="space-y-2">
                 {session.supplementary.sets.map((set, i) => (
@@ -3352,20 +3316,33 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
             </div>
           )}
 
-          <div className="text-[10px] uppercase tracking-widest text-neutral-500 font-mono mb-3">ACCESSORIES</div>
-          <div className="space-y-3">
-            {session.accessories.map(acc => (
-              <AccessoryCard key={acc.id} ex={acc} onUpdate={updateAcc} />
+          <div className="flex items-baseline justify-between mt-8 mb-1">
+            <div className="text-[12px] font-medium text-orange-400">{session.supplementary ? 3 : 2} · Accessories</div>
+          </div>
+          <div className="text-[13px] text-neutral-500 mb-4">Done in pairs: alternate A1 and A2, rest ~60 s, then move to B.</div>
+          <div className="space-y-5">
+            {Array.from({ length: Math.ceil(session.accessories.length / 2) }, (_, g) => session.accessories.slice(g * 2, g * 2 + 2)).map((pair, g) => (
+              <div key={g}>
+                <div className="flex items-center gap-2 mb-2">
+                  <div className="w-6 h-6 rounded-md bg-neutral-900 border border-neutral-800 flex items-center justify-center text-[12px] font-semibold text-neutral-300">{'ABCD'[g]}</div>
+                  <div className="text-[12px] text-neutral-500">{pair.length > 1 ? 'Pair' : 'Single'}</div>
+                </div>
+                <div className="space-y-2">
+                  {pair.map((acc, k) => (
+                    <AccessoryCard key={acc.id} ex={acc} onUpdate={updateAcc} tag={pair.length > 1 ? `${'ABCD'[g]}${k + 1}` : null} />
+                  ))}
+                </div>
+              </div>
             ))}
           </div>
 
           <div className="fixed bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-black via-black/95 to-transparent" style={{ paddingBottom: 'calc(1rem + env(safe-area-inset-bottom))' }}>
             <div className="max-w-2xl mx-auto">
               <button onClick={() => onComplete(session)} disabled={!mainComplete}
-                className={`w-full py-5 rounded-xl font-bold uppercase tracking-[0.15em] text-sm transition-all ${
-                  mainComplete ? 'bg-orange-500 hover:bg-orange-400 text-black active:scale-[0.99]' : 'bg-neutral-900 text-neutral-600 cursor-not-allowed'
+                className={`w-full h-14 rounded-2xl font-semibold text-[15px] transition-all ${
+                  mainComplete ? 'bg-orange-500 text-black active:scale-[0.99]' : 'bg-neutral-900 text-neutral-500 cursor-not-allowed'
                 }`}>
-                {totalDone === totalSets ? 'Finish Workout' : mainComplete ? 'Log Workout' : 'Finish Main Lift First'}
+                {totalDone === totalSets ? 'Finish workout' : mainComplete ? `Finish workout · ${totalSets - totalDone} sets skipped` : 'Finish the main lift to save'}
               </button>
             </div>
           </div>
@@ -4410,517 +4387,6 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
       return series;
     };
 
-    const ProgressList = ({ state }) => {
-      const series = buildExerciseSeries(state.history);
-      const entries = Array.from(series.entries()).filter(([, v]) => v.points.length >= 2);
-      if (entries.length === 0) {
-        return (
-          <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-8 text-center">
-            <BarChart size={28} className="text-neutral-700 mx-auto mb-3" />
-            <div className="text-neutral-500 text-sm">Log at least 2 sessions to see progress charts.</div>
-          </div>
-        );
-      }
-      // Order: main lifts first (in DAY_ORDER's lift order), then accessories
-      const mainOrder = ['bench', 'squat', 'deadlift', 'press'];
-      entries.sort(([a], [b]) => {
-        const aIsMain = a.startsWith('main:'), bIsMain = b.startsWith('main:');
-        if (aIsMain && !bIsMain) return -1;
-        if (bIsMain && !aIsMain) return 1;
-        if (aIsMain && bIsMain) {
-          return mainOrder.indexOf(a.split(':')[1]) - mainOrder.indexOf(b.split(':')[1]);
-        }
-        return 0;
-      });
-      return (
-        <div className="space-y-3">
-          {entries.map(([key, s]) => {
-            const pts = s.points;
-            const first = pts[0];
-            const last = pts[pts.length - 1];
-            const delta = last.value - first.value;
-            const color = s.type === 'main' ? '#F97316' : s.type === 'bw' ? '#60a5fa' : s.type === 'timed' ? '#a78bfa' : '#84cc16';
-            const unit = s.type === 'main' ? 'est 1RM lb'
-                       : s.type === 'bw'   ? 'reps'
-                       : s.type === 'timed'? 'sec'
-                       :                     'lb·reps';
-            return (
-              <div key={key} className="bg-neutral-950 border border-neutral-800 rounded-xl p-4">
-                <div className="flex items-baseline justify-between mb-1 gap-3">
-                  <div className="font-bold text-neutral-50 truncate">{s.name}</div>
-                  <div className="text-[10px] uppercase tracking-wider text-neutral-500 font-mono shrink-0">
-                    {Math.round(last.value).toLocaleString()} <span className="text-neutral-600">{unit}</span>
-                  </div>
-                </div>
-                <Sparkline points={pts} color={color} height={44} />
-                <div className="flex items-center justify-between mt-2 text-[10px] text-neutral-500 font-mono uppercase tracking-wider">
-                  <span>{pts.length} sessions</span>
-                  <span className={delta > 0 ? 'text-green-400' : delta < 0 ? 'text-red-400' : 'text-neutral-500'}>
-                    {delta > 0 ? '+' : ''}{Math.round(delta).toLocaleString()} since first
-                  </span>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      );
-    };
-
-    // ============================================================
-    // RUN + PILATES: log form, weekly plan, progress
-    // ============================================================
-    // CardioLogForm handles new entries (from a plan slot or ad hoc) and edits.
-    const CardioLogForm = ({ open, initial, onCancel, onSave, onDelete }) => {
-      const [f, setF] = useState(null);
-      useEffect(() => {
-        if (!open) return;
-        const i = initial || {};
-        setF({
-          type: i.type || 'run',
-          date: i.date || todayKey(),
-          distance: i.distanceMi != null ? String(i.distanceMi) : '',
-          duration: i.type === 'pilates'
-            ? (i.durationMin != null ? String(Math.round(i.durationMin)) : '')
-            : (i.durationMin != null ? fmtDuration(i.durationMin) : ''),
-          where: i.where || 'tread',
-          rpe: i.rpe != null ? String(i.rpe) : '',
-          className: i.className || '',
-          notes: i.notes || '',
-        });
-      }, [open, initial]);
-      if (!open || !f) return null;
-      const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
-      const isRun = f.type === 'run';
-      const dist = parseFloat(f.distance);
-      const durMin = isRun ? parseDuration(f.duration) : parseFloat(f.duration);
-      const pace = isRun && dist > 0 && durMin > 0 ? durMin / dist : null;
-      const valid = isRun ? (dist > 0 && durMin > 0) : durMin > 0;
-      const slot = initial && initial.slot ? CARDIO_SLOTS[initial.slot] : null;
-      const save = () => {
-        if (!valid) return;
-        const rpe = parseInt(f.rpe, 10);
-        onSave({
-          ...(initial || {}),
-          id: (initial && initial.id) || `c-${Date.now().toString(36)}`,
-          type: f.type,
-          slot: slot && slot.type === f.type ? slot.id : null,
-          kind: isRun ? ((slot && slot.kind) || (initial && initial.kind) || 'easy') : undefined,
-          focus: !isRun ? ((slot && slot.focus) || (initial && initial.focus) || null) : undefined,
-          date: f.date || todayKey(),
-          distanceMi: isRun ? Math.round(dist * 100) / 100 : null,
-          durationMin: Math.round(durMin * 60) / 60, // whole seconds
-          where: isRun ? f.where : null,
-          rpe: Number.isFinite(rpe) ? Math.max(1, Math.min(10, rpe)) : null,
-          className: !isRun ? f.className.trim() : null,
-          notes: f.notes.trim(),
-          loggedAt: (initial && initial.loggedAt) || new Date().toISOString(),
-          source: 'manual',
-        });
-      };
-      const inputCls = 'w-full bg-neutral-900 border border-neutral-800 focus:border-orange-500 rounded-lg px-3 py-2.5 text-neutral-50 outline-none font-mono';
-      const labelCls = 'text-[10px] uppercase tracking-widest text-neutral-500 font-mono mb-1 block';
-      return (
-        <div className="fixed inset-0 bg-black/85 z-50 flex items-end sm:items-center justify-center p-4" onClick={onCancel}>
-          <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-5 w-full max-w-sm max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-            <div className="text-xs uppercase tracking-widest text-orange-400 font-semibold mb-3">
-              {initial && initial.loggedAt ? 'Edit' : 'Log'} {slot ? slot.label.replace(' (optional)', '') : (isRun ? 'Run' : 'Pilates')}
-            </div>
-            {!slot && !(initial && initial.loggedAt) && (
-              <div className="grid grid-cols-2 gap-2 mb-3">
-                {[['run', 'Run'], ['pilates', 'Pilates']].map(([id, l]) => (
-                  <button key={id} onClick={() => set('type', id)}
-                    className={`py-2 rounded-lg text-xs uppercase tracking-wider font-mono border ${f.type === id ? 'bg-orange-500 text-black border-orange-500 font-bold' : 'bg-neutral-900 text-neutral-400 border-neutral-800'}`}>{l}</button>
-                ))}
-              </div>
-            )}
-            <div className="space-y-3">
-              <div>
-                <label className={labelCls}>Date</label>
-                <input type="date" value={f.date} onChange={(e) => set('date', e.target.value)} className={inputCls} />
-              </div>
-              {isRun ? (
-                <>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className={labelCls}>Distance (mi)</label>
-                      <input type="number" inputMode="decimal" step="0.01" value={f.distance} onChange={(e) => set('distance', e.target.value)} className={inputCls} placeholder="4.0" />
-                    </div>
-                    <div>
-                      <label className={labelCls}>Time (h:mm:ss)</label>
-                      <input type="text" inputMode="numeric" value={f.duration} onChange={(e) => set('duration', e.target.value)} className={inputCls} placeholder="42:30" />
-                    </div>
-                  </div>
-                  <div className="text-xs font-mono text-neutral-400">Pace: <span className="text-orange-400 font-bold">{pace ? `${fmtPace(pace)}/mi` : '—'}</span></div>
-                  <div>
-                    <label className={labelCls}>Where</label>
-                    <div className="grid grid-cols-2 gap-2">
-                      {[['tread', 'Tread'], ['road', 'Road']].map(([id, l]) => (
-                        <button key={id} onClick={() => set('where', id)}
-                          className={`py-2 rounded-lg text-xs uppercase tracking-wider font-mono border ${f.where === id ? 'bg-neutral-100 text-black border-neutral-100 font-bold' : 'bg-neutral-900 text-neutral-400 border-neutral-800'}`}>{l}</button>
-                      ))}
-                    </div>
-                  </div>
-                  <div>
-                    <label className={labelCls}>Effort 1–10 (optional)</label>
-                    <input type="number" inputMode="numeric" min="1" max="10" value={f.rpe} onChange={(e) => set('rpe', e.target.value)} className={inputCls} placeholder="5" />
-                  </div>
-                </>
-              ) : (
-                <>
-                  <div>
-                    <label className={labelCls}>Minutes</label>
-                    <input type="number" inputMode="numeric" value={f.duration} onChange={(e) => set('duration', e.target.value)} className={inputCls} placeholder="50" />
-                  </div>
-                  <div>
-                    <label className={labelCls}>Class (iFit name)</label>
-                    <input type="text" value={f.className} onChange={(e) => set('className', e.target.value)} className={inputCls + ' font-sans'} placeholder="e.g. Reformer core burn" />
-                  </div>
-                </>
-              )}
-              <div>
-                <label className={labelCls}>Notes</label>
-                <textarea rows={2} value={f.notes} onChange={(e) => set('notes', e.target.value)} className={inputCls + ' font-sans text-sm'} placeholder={isRun ? 'How did the legs feel?' : 'Back feel, what was tight…'} />
-              </div>
-            </div>
-            <div className="flex gap-2 mt-4">
-              <button onClick={onCancel} className="flex-1 py-3 rounded-lg border border-neutral-800 text-neutral-400 uppercase tracking-wider text-sm font-semibold">Cancel</button>
-              <button onClick={save} disabled={!valid} className={`flex-1 py-3 rounded-lg uppercase tracking-wider text-sm font-bold ${valid ? 'bg-orange-500 text-black' : 'bg-neutral-800 text-neutral-500'}`}>Save</button>
-            </div>
-            {onDelete && initial && initial.loggedAt && (
-              <button onClick={() => { if (window.confirm('Delete this entry?')) onDelete(initial.id); }}
-                className="w-full mt-2 py-2 text-xs uppercase tracking-wider text-red-400/80 font-mono">Delete entry</button>
-            )}
-          </div>
-        </div>
-      );
-    };
-
-    // The week as a schedule: each day's lift + run/Pilates, with check marks.
-    const WeekPlanCard = ({ state, onStartLift, onLogSlot }) => {
-      const thisWeek = cardioThisWeek(state);
-      const todayIdx = (new Date().getDay() + 6) % 7;
-      const runMiles = thisWeek.filter((c) => c.type === 'run').reduce((a, c) => a + (c.distanceMi || 0), 0);
-      const plannedMiles = Object.values(CARDIO_SLOTS)
-        .filter((sl) => sl.type === 'run' && !sl.optional)
-        .reduce((a, sl) => a + ((prescribeCardio(sl.id, state) || {}).distanceMi || 0), 0);
-      const pilatesDone = thisWeek.filter((c) => c.type === 'pilates').length;
-      return (
-        <div className="mb-6">
-          <div className="flex items-baseline justify-between mb-3">
-            <div className="text-xs uppercase tracking-[0.2em] text-neutral-500 font-mono">WEEK PLAN</div>
-            <div className="text-[10px] uppercase tracking-wider text-neutral-500 font-mono">
-              <span className="text-neutral-300">{Math.round(runMiles * 10) / 10}</span>/{plannedMiles} mi · <span className="text-neutral-300">{pilatesDone}</span>/2 pilates
-            </div>
-          </div>
-          <div className="space-y-2">
-            {WEEK_PLAN.map((d, idx) => (
-              <div key={d.day} className={`rounded-xl border p-3 ${idx === todayIdx ? 'border-orange-500/50 bg-orange-500/5' : 'border-neutral-800 bg-neutral-950'}`}>
-                <div className="flex items-start gap-3">
-                  <div className={`w-10 shrink-0 font-display text-lg tracking-wide leading-tight ${idx === todayIdx ? 'text-orange-400' : 'text-neutral-500'}`}>{d.day.toUpperCase()}</div>
-                  <div className="flex-1 min-w-0 space-y-2">
-                    {d.items.length === 0 && <div className="text-sm text-neutral-500 py-0.5">Rest — walk, stretch, sleep.</div>}
-                    {d.items.map((it) => {
-                      if (it.lift) {
-                        const tpl = DAY_TEMPLATES[it.lift];
-                        const done = state.completedThisWeek[it.lift];
-                        return (
-                          <button key={it.lift} onClick={() => onStartLift(it.lift)} className="w-full flex items-center justify-between gap-2 text-left active:scale-[0.99]">
-                            <div className="min-w-0">
-                              <div className={`text-sm font-semibold ${done ? 'text-neutral-500 line-through' : 'text-neutral-100'}`}>{tpl.name}</div>
-                              <div className="text-[11px] text-neutral-500 font-mono truncate">{tpl.mainName} · {WEEK_SCHEMES[state.week].label} · ~60 min</div>
-                            </div>
-                            {done ? <Check size={16} className="text-green-400 shrink-0" strokeWidth={3} /> : <ArrowRight size={14} className="text-orange-400 shrink-0" />}
-                          </button>
-                        );
-                      }
-                      const sl = CARDIO_SLOTS[it.slot];
-                      const rx = prescribeCardio(it.slot, state);
-                      const entry = thisWeek.find((c) => c.slot === it.slot);
-                      return (
-                        <button key={it.slot} onClick={() => onLogSlot(it.slot, entry)} className="w-full flex items-center justify-between gap-2 text-left active:scale-[0.99]">
-                          <div className="min-w-0">
-                            <div className={`text-sm font-semibold ${entry ? 'text-neutral-500' : sl.optional ? 'text-neutral-400' : 'text-neutral-100'}`}>
-                              {sl.label}{rx ? <span className="font-normal text-neutral-400"> · {rx.title}</span> : null}
-                            </div>
-                            <div className="text-[11px] text-neutral-500 leading-snug">
-                              {entry
-                                ? (entry.type === 'run'
-                                    ? `${entry.distanceMi} mi in ${fmtDuration(entry.durationMin)} · ${fmtPace(entry.durationMin / entry.distanceMi)}/mi`
-                                    : `${Math.round(entry.durationMin)} min${entry.className ? ` · ${entry.className}` : ''}`)
-                                : rx && rx.detail}
-                            </div>
-                          </div>
-                          {entry ? <Check size={16} className="text-green-400 shrink-0" strokeWidth={3} /> : <Plus size={14} className="text-orange-400 shrink-0" />}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      );
-    };
-
-    // Running + Pilates progress: weekly miles (8 wks), long-run trend, easy pace.
-    const CardioProgressCard = ({ state }) => {
-      const log = state.cardioLog || [];
-      const runs = log.filter((c) => c.type === 'run' && c.distanceMi > 0 && c.durationMin > 0);
-      if (log.length === 0) {
-        return (
-          <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-5 mb-3 text-sm text-neutral-500">
-            Log runs and Pilates from the Week Plan to see weekly mileage, long-run progress and pace trends here.
-          </div>
-        );
-      }
-      const thisMon = parseDateKey(weekStartKey());
-      const weeks = Array.from({ length: 8 }, (_, i) => {
-        const start = new Date(thisMon); start.setDate(start.getDate() - 7 * (7 - i));
-        const end = new Date(start); end.setDate(end.getDate() + 7);
-        const sk = dateKey(start), ek = dateKey(end);
-        const inWk = log.filter((c) => c.date >= sk && c.date < ek);
-        return {
-          label: `${start.getMonth() + 1}/${start.getDate()}`,
-          miles: inWk.filter((c) => c.type === 'run').reduce((a, c) => a + (c.distanceMi || 0), 0),
-          pilates: inWk.filter((c) => c.type === 'pilates').length,
-        };
-      });
-      const maxMi = Math.max(10, ...weeks.map((w) => w.miles));
-      const longest = runs.reduce((m, r) => (r.distanceMi > (m ? m.distanceMi : 0) ? r : m), null);
-      const cutoff = new Date(); cutoff.setDate(cutoff.getDate() - 28);
-      const recentEasy = runs.filter((r) => r.date >= dateKey(cutoff) && r.kind !== 'quality');
-      const easyPace = recentEasy.length
-        ? recentEasy.reduce((a, r) => a + r.durationMin, 0) / recentEasy.reduce((a, r) => a + r.distanceMi, 0) : null;
-      const bestHalfish = runs.filter((r) => r.distanceMi >= 13).sort((a, b) => a.durationMin / a.distanceMi - b.durationMin / b.distanceMi)[0];
-      return (
-        <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-4 mb-3">
-          <div className="flex items-baseline justify-between mb-3">
-            <div className="font-bold text-neutral-50">Running & Pilates</div>
-            <div className="text-[10px] uppercase tracking-wider text-neutral-500 font-mono">goal 13.1 mi @ 8:00</div>
-          </div>
-          <div className="flex items-end gap-1.5 h-24 mb-1">
-            {weeks.map((w, i) => (
-              <div key={i} className="flex-1 flex flex-col items-center justify-end h-full">
-                <div className="text-[9px] font-mono text-neutral-400 mb-0.5">{w.miles ? Math.round(w.miles) : ''}</div>
-                <div className={`w-full rounded-sm ${i === 7 ? 'bg-orange-500' : 'bg-orange-500/50'}`} style={{ height: `${(w.miles / maxMi) * 100}%`, minHeight: w.miles ? 2 : 0 }} />
-              </div>
-            ))}
-          </div>
-          <div className="flex gap-1.5 mb-3">
-            {weeks.map((w, i) => (
-              <div key={i} className="flex-1 text-center">
-                <div className="text-[8px] font-mono text-neutral-600">{w.label}</div>
-                <div className="text-[9px] font-mono text-violet-400">{'●'.repeat(Math.min(w.pilates, 3))}</div>
-              </div>
-            ))}
-          </div>
-          <div className="grid grid-cols-3 gap-2 text-center">
-            <div className="bg-neutral-900 rounded-lg p-2">
-              <div className="text-[9px] uppercase tracking-wider text-neutral-500 font-mono">Longest</div>
-              <div className="font-mono font-bold text-neutral-100">{longest ? `${longest.distanceMi} mi` : '—'}</div>
-            </div>
-            <div className="bg-neutral-900 rounded-lg p-2">
-              <div className="text-[9px] uppercase tracking-wider text-neutral-500 font-mono">Easy pace 4wk</div>
-              <div className="font-mono font-bold text-neutral-100">{easyPace ? fmtPace(easyPace) : '—'}</div>
-            </div>
-            <div className="bg-neutral-900 rounded-lg p-2">
-              <div className="text-[9px] uppercase tracking-wider text-neutral-500 font-mono">Best 13+ mi</div>
-              <div className="font-mono font-bold text-neutral-100">{bestHalfish ? fmtPace(bestHalfish.durationMin / bestHalfish.distanceMi) : '—'}</div>
-            </div>
-          </div>
-        </div>
-      );
-    };
-
-    // ============================================================
-    // IRON LOG VIEW (Train / Progress / History sub-tabs)
-    // ============================================================
-    const IronLogView = ({ state, onStart, onSettings, onUpdateState }) => {
-      const [sub, setSub] = useState('train'); // train | progress | history
-      const [historyFilter, setHistoryFilter] = useState('all');
-      const [selected, setSelected] = useState(null);
-      const [cardioForm, setCardioForm] = useState(null); // initial entry object or null
-
-      const saveCardio = (entry) => {
-        onUpdateState((prev) => {
-          const list = (prev.cardioLog || []).filter((c) => c.id !== entry.id);
-          const next = [entry, ...list].sort((a, b) => (a.date === b.date ? (a.loggedAt < b.loggedAt ? 1 : -1) : (a.date < b.date ? 1 : -1)));
-          return { ...prev, cardioLog: next.slice(0, 1000) };
-        });
-        setCardioForm(null);
-      };
-      const deleteCardio = (id) => {
-        onUpdateState((prev) => ({ ...prev, cardioLog: (prev.cardioLog || []).filter((c) => c.id !== id) }));
-        setCardioForm(null);
-      };
-      const openSlot = (slotId, existing) => {
-        if (existing) { setCardioForm(existing); return; }
-        const sl = CARDIO_SLOTS[slotId];
-        const rx = prescribeCardio(slotId, state);
-        setCardioForm({ type: sl.type, slot: slotId, kind: sl.kind, focus: sl.focus,
-          distanceMi: rx && rx.distanceMi ? rx.distanceMi : null,
-          durationMin: sl.type === 'pilates' ? 50 : null });
-      };
-      const cardioModal = (
-        <CardioLogForm open={!!cardioForm} initial={cardioForm} onCancel={() => setCardioForm(null)} onSave={saveCardio} onDelete={deleteCardio} />
-      );
-
-      if (selected) {
-        return <SessionDetailView session={selected} onBack={() => setSelected(null)} state={state} onUpdateState={onUpdateState} />;
-      }
-
-      const history = state.history || [];
-      const cardio = state.cardioLog || [];
-      const isCardioFilter = historyFilter === 'run' || historyFilter === 'pilates';
-      const liftRows = isCardioFilter ? [] : (historyFilter === 'all' ? history : history.filter(s => s.dayId === historyFilter))
-        .map((s) => ({ kind: 'lift', ts: s.completedAt || '', s }));
-      const cardioRows = (historyFilter === 'all' || isCardioFilter)
-        ? cardio.filter((c) => historyFilter === 'all' || c.type === historyFilter)
-            .map((c) => ({ kind: 'cardio', ts: c.date === (c.loggedAt || '').slice(0, 10) ? c.loggedAt : `${c.date}T12:00:00`, c }))
-        : [];
-      const filtered = [...liftRows, ...cardioRows].sort((a, b) => (a.ts < b.ts ? 1 : -1));
-      const trainedToday = history.some((h) => h.completedAt && new Date(h.completedAt).toDateString() === new Date().toDateString());
-
-      return (
-        <div className="px-5 pb-28 pt-6 max-w-2xl mx-auto">
-          {cardioModal}
-          <div className="flex items-center justify-between mb-4">
-            <div className="font-display text-3xl tracking-wide text-neutral-50">IRON LOG <span className="text-[9px] font-mono text-neutral-600 tracking-normal align-top">v4</span></div>
-            <div className="text-[10px] uppercase tracking-[0.2em] font-mono text-neutral-500">
-              C{state.cycle}·W{state.week} · {WEEK_SCHEMES[state.week].label}
-            </div>
-          </div>
-
-          <div className="grid grid-cols-3 gap-2 mb-6">
-            {[['train', 'Train'], ['progress', 'Progress'], ['history', 'History']].map(([id, label]) => (
-              <button key={id} onClick={() => setSub(id)}
-                className={`py-2.5 rounded-lg text-xs uppercase tracking-wider font-mono border transition-all ${
-                  sub === id ? 'bg-orange-500 text-black border-orange-500 font-bold' : 'bg-neutral-950 text-neutral-400 border-neutral-800 hover:border-neutral-700'
-                }`}>{label}</button>
-            ))}
-          </div>
-
-          {sub === 'train' && (
-            <>
-              {trainedToday && (
-                <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-3 mb-4 text-xs text-amber-200/90">
-                  <span className="font-bold uppercase tracking-wider text-amber-400 mr-1">Already trained today.</span>
-                  Stacking a second main lift on the same day reliably costs reps on the second session. Unless you're catching up after time off, come back tomorrow.
-                </div>
-              )}
-              <WeekPlanCard state={state} onStartLift={onStart} onLogSlot={openSlot} />
-              <div className="text-xs uppercase tracking-[0.2em] text-neutral-500 font-mono mb-3">LIFTS · C{state.cycle}·W{state.week}</div>
-              <div className="grid grid-cols-2 gap-3 mb-4">
-                {DAY_ORDER.map(dayId => {
-                  const tpl = DAY_TEMPLATES[dayId];
-                  const done = state.completedThisWeek[dayId];
-                  return (
-                    <button key={dayId} onClick={() => onStart(dayId)}
-                      className={`relative text-left p-4 rounded-xl border transition-all active:scale-[0.98] ${
-                        done ? 'bg-neutral-950 border-green-900/40' : 'bg-gradient-to-br from-neutral-950 to-neutral-900 border-neutral-800 hover:border-orange-500/50'
-                      }`}>
-                      {done && (
-                        <div className="absolute top-3 right-3 w-6 h-6 rounded-full bg-green-500/20 border border-green-500/40 flex items-center justify-center">
-                          <Check size={12} className="text-green-400" strokeWidth={3} />
-                        </div>
-                      )}
-                      <div className="font-display text-2xl tracking-wide leading-none mb-2 text-neutral-50">
-                        {tpl.name.split(' ')[0].toUpperCase()}
-                      </div>
-                      <div className="text-[10px] uppercase tracking-wider text-neutral-500 font-mono">{tpl.mainName}</div>
-                      {!done && (
-                        <div className="mt-3 text-xs uppercase tracking-wider text-orange-400 font-semibold flex items-center gap-1">
-                          Start <ArrowRight size={12} strokeWidth={3} />
-                        </div>
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
-              <button onClick={() => setCardioForm({ type: 'run' })}
-                className="w-full py-3 rounded-xl border border-dashed border-neutral-700 text-xs uppercase tracking-wider font-mono text-neutral-400 hover:border-orange-500/50 flex items-center justify-center gap-1.5">
-                <Plus size={14} /> Log another run or Pilates
-              </button>
-            </>
-          )}
-
-          {sub === 'progress' && (<><CardioProgressCard state={state} /><ProgressList state={state} /></>)}
-
-          {sub === 'history' && (
-            <>
-              <div className="flex gap-2 mb-4 flex-wrap">
-                {['all', ...DAY_ORDER, 'run', 'pilates'].map(f => (
-                  <button key={f} onClick={() => setHistoryFilter(f)}
-                    className={`px-3 py-1.5 rounded-lg text-xs uppercase tracking-wider font-mono border transition-all ${
-                      historyFilter === f ? 'bg-orange-500 text-black border-orange-500 font-bold' : 'bg-neutral-950 text-neutral-400 border-neutral-800 hover:border-neutral-700'
-                    }`}>
-                    {f === 'all' ? 'All' : f === 'run' ? 'Runs' : f === 'pilates' ? 'Pilates' : DAY_TEMPLATES[f].name.split(' ')[0]}
-                  </button>
-                ))}
-              </div>
-              {filtered.length === 0 ? (
-                <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-8 text-center">
-                  <div className="text-neutral-500 text-sm">No sessions yet.</div>
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  {filtered.map((row, i) => {
-                    if (row.kind === 'cardio') {
-                      const c = row.c;
-                      return (
-                        <button key={c.id} onClick={() => setCardioForm(c)} className="w-full text-left bg-neutral-950 border border-neutral-800 rounded-lg p-4 hover:border-neutral-700 active:scale-[0.99]">
-                          <div className="flex items-start justify-between gap-3">
-                            <div className="min-w-0">
-                              <div className="font-semibold text-neutral-50 truncate">{cardioEntryTitle(c)}</div>
-                              <div className="text-xs text-neutral-500 font-mono">{parseDateKey(c.date).toLocaleDateString()}{c.focus ? ` · ${c.focus}` : ''}</div>
-                            </div>
-                            <div className="text-right shrink-0">
-                              <div className={`font-mono font-bold ${c.type === 'run' ? 'text-sky-400' : 'text-violet-400'}`}>
-                                {c.type === 'run' ? `${c.distanceMi} mi` : `${Math.round(c.durationMin)} min`}
-                              </div>
-                              <div className="text-[10px] uppercase tracking-wider text-neutral-500 font-mono">
-                                {c.type === 'run' ? `${fmtPace(c.durationMin / c.distanceMi)}/mi` : 'pilates'}
-                              </div>
-                            </div>
-                          </div>
-                          {c.notes && <div className="text-xs text-neutral-500 mt-2 line-clamp-2">{c.notes}</div>}
-                        </button>
-                      );
-                    }
-                    const s = row.s;
-                    const amrap = s.mainSets?.find(set => set.isAmrap && set.actualReps);
-                    return (
-                      <button key={i} onClick={() => setSelected(s)} className="w-full text-left bg-neutral-950 border border-neutral-800 rounded-lg p-4 hover:border-neutral-700 active:scale-[0.99]">
-                        <div className="flex items-start justify-between mb-1 gap-3">
-                          <div className="min-w-0">
-                            <div className="font-semibold text-neutral-50">{s.name}</div>
-                            <div className="text-xs text-neutral-500 font-mono">
-                              C{s.cycle}·W{s.week} · {s.completedAt ? new Date(s.completedAt).toLocaleDateString() : ''}
-                            </div>
-                          </div>
-                          {amrap && (
-                            <div className="text-right shrink-0">
-                              <div className="font-mono text-orange-400 font-bold">{amrap.weight}×{amrap.actualReps}</div>
-                              <div className="text-[10px] uppercase tracking-wider text-neutral-500">{s.mainLift}</div>
-                            </div>
-                          )}
-                        </div>
-                        <div className="text-xs text-neutral-500 mt-2 flex items-center justify-between">
-                          <span>{s.accessories?.length || 0} accessories · {s.mainSets?.filter(x => x.completed).length || 0} main sets</span>
-                          <ChevronRight size={14} className="text-neutral-600" />
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-            </>
-          )}
-        </div>
-      );
-    };
-
     // ============================================================
     // SESSION DETAIL VIEW (drill-down from History)
     // ============================================================
@@ -5704,9 +5170,964 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
     // ============================================================
     // ROOT APP
     // ============================================================
+    // ============================================================
+    // DESIGN SYSTEM (v4) — three disciplines, each with one colour
+    // ============================================================
+    // Strength = orange, Run = sky, Pilates = violet. Every surface that shows
+    // a training block uses DISC so the three never blur together.
+    const Footprints = (p) => <Icon {...p}><path d="M4 16v-2.38C4 11.5 2.97 10.5 3 8c.03-2.72 1.49-6 4.5-6C9.37 2 10 3.8 10 5.5c0 3.11-2 5.66-2 8.68V16a2 2 0 1 1-4 0Z"/><path d="M20 20v-2.38c0-2.12 1.03-3.12 1-5.62-.03-2.72-1.49-6-4.5-6C14.63 6 14 7.8 14 9.5c0 3.11 2 5.66 2 8.68V20a2 2 0 1 0 4 0Z"/><path d="M16 17h4"/><path d="M4 13h4"/></Icon>;
+    const Stretch = (p) => <Icon {...p}><circle cx="12" cy="4.5" r="1.5"/><path d="m9 20 3-6 3 6"/><path d="m6 8 6 2 6-2"/><path d="M12 10v4"/></Icon>;
+    const Moon = (p) => <Icon {...p}><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></Icon>;
+    const Target = (p) => <Icon {...p}><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></Icon>;
+
+    const DISC = {
+      strength: { key: 'strength', label: 'Strength', icon: Dumbbell, hex: '#F97316',
+        text: 'text-orange-400', soft: 'bg-orange-500/10', ring: 'border-orange-500/30', solid: 'bg-orange-500', bar: 'bg-orange-500' },
+      run:      { key: 'run', label: 'Run', icon: Footprints, hex: '#38BDF8',
+        text: 'text-sky-400', soft: 'bg-sky-500/10', ring: 'border-sky-500/30', solid: 'bg-sky-400', bar: 'bg-sky-400' },
+      pilates:  { key: 'pilates', label: 'Pilates', icon: Stretch, hex: '#A78BFA',
+        text: 'text-violet-400', soft: 'bg-violet-500/10', ring: 'border-violet-500/30', solid: 'bg-violet-400', bar: 'bg-violet-400' },
+    };
+    const DAY_NAMES_LONG = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+    const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const todayPlanIdx = () => (new Date().getDay() + 6) % 7;
+    const fmtHMS = (min) => fmtDuration(min);
+
+    // Small shared primitives.
+    const ScreenHeader = ({ eyebrow, title, right }) => (
+      <div className="flex items-end justify-between mb-6">
+        <div>
+          {eyebrow && <div className="text-[11px] font-medium tracking-[0.16em] uppercase text-neutral-500 mb-1">{eyebrow}</div>}
+          <div className="font-display text-[34px] leading-none tracking-wide text-neutral-50">{title}</div>
+        </div>
+        {right}
+      </div>
+    );
+    const SectionLabel = ({ children, right }) => (
+      <div className="flex items-baseline justify-between mb-3 mt-8">
+        <div className="text-[11px] font-semibold tracking-[0.16em] uppercase text-neutral-500">{children}</div>
+        {right}
+      </div>
+    );
+    const DiscChip = ({ d, children }) => {
+      const D = DISC[d]; const Ic = D.icon;
+      return (
+        <div className={`inline-flex items-center gap-1.5 text-[11px] font-semibold tracking-[0.12em] uppercase ${D.text}`}>
+          <Ic size={13} strokeWidth={2.4} /> {children || D.label}
+        </div>
+      );
+    };
+    const Card = ({ children, className = '', onClick }) => {
+      const C = onClick ? 'button' : 'div';
+      return (
+        <C onClick={onClick} className={`block w-full text-left bg-neutral-950 border border-neutral-800/80 rounded-2xl ${onClick ? 'active:scale-[0.99] transition-transform' : ''} ${className}`}>
+          {children}
+        </C>
+      );
+    };
+    const Segmented = ({ options, value, onChange }) => (
+      <div className="flex p-1 bg-neutral-900/70 border border-neutral-800 rounded-xl mb-6">
+        {options.map(([id, label]) => (
+          <button key={id} onClick={() => onChange(id)}
+            className={`flex-1 py-2 rounded-lg text-[13px] font-medium transition-colors ${value === id ? 'bg-neutral-100 text-black' : 'text-neutral-400'}`}>
+            {label}
+          </button>
+        ))}
+      </div>
+    );
+    const Sheet = ({ open, onClose, children }) => {
+      if (!open) return null;
+      return (
+        <div className="fixed inset-0 z-50 flex items-end justify-center" onClick={onClose}>
+          <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" />
+          <div className="relative w-full max-w-2xl bg-neutral-950 border-t border-neutral-800 rounded-t-3xl px-5 pt-3 max-h-[88vh] overflow-y-auto"
+               style={{ paddingBottom: 'calc(1.5rem + env(safe-area-inset-bottom))' }} onClick={(e) => e.stopPropagation()}>
+            <div className="w-10 h-1 rounded-full bg-neutral-700 mx-auto mb-5" />
+            {children}
+          </div>
+        </div>
+      );
+    };
+    const Meter = ({ d, value, target, label, unit }) => {
+      const D = DISC[d];
+      const pct = target ? Math.min(100, (value / target) * 100) : 0;
+      return (
+        <div className="min-w-0">
+          <div className="flex items-center gap-1.5 mb-2">
+            <div className={`w-1.5 h-1.5 rounded-full ${D.solid}`} />
+            <div className="text-[11px] font-medium text-neutral-400 truncate">{label}</div>
+          </div>
+          <div className="font-mono text-neutral-50 text-lg font-bold leading-none mb-2">
+            {value}<span className="text-neutral-600 text-sm font-normal">/{target}{unit ? ` ${unit}` : ''}</span>
+          </div>
+          <div className="h-1 bg-neutral-800 rounded-full overflow-hidden">
+            <div className={`h-full ${D.bar} rounded-full transition-all`} style={{ width: `${pct}%` }} />
+          </div>
+        </div>
+      );
+    };
+
+    // ============================================================
+    // PLAN MODEL — what's on a given day, and its status this week
+    // ============================================================
+    const liftTopSet = (dayId, state) => {
+      const tpl = DAY_TEMPLATES[dayId];
+      const tm = (state.trainingMaxes || {})[tpl.mainLift] || defaultState.trainingMaxes[tpl.mainLift];
+      const last = WEEK_SCHEMES[state.week].sets[2];
+      return { weight: round5(tm * last.pct), reps: last.reps, amrap: last.isAmrap };
+    };
+    // Items for a plan day, resolved against this week's logs.
+    const resolvePlanDay = (idx, state) => {
+      const thisWeek = cardioThisWeek(state);
+      return WEEK_PLAN[idx].items.map((it) => {
+        if (it.lift) {
+          const tpl = DAY_TEMPLATES[it.lift];
+          const done = !!(state.completedThisWeek || {})[it.lift];
+          const inProgress = state.activeSession && state.activeSession.dayId === it.lift;
+          const top = liftTopSet(it.lift, state);
+          const lastSession = done ? (state.history || []).find((h) => h.dayId === it.lift) : null;
+          return { kind: 'lift', d: 'strength', id: it.lift, tpl, done, inProgress, top, lastSession,
+            title: tpl.name, sets: daySetCount(tpl, state.week), minutes: estimateMinutes(tpl, state.week) };
+        }
+        const sl = CARDIO_SLOTS[it.slot];
+        const rx = prescribeCardio(it.slot, state);
+        const entry = thisWeek.find((c) => c.slot === it.slot);
+        return { kind: 'cardio', d: sl.type === 'run' ? 'run' : 'pilates', id: it.slot, slot: sl, rx, entry, done: !!entry,
+          title: sl.type === 'run' ? `${sl.label.replace(' (optional)', '')}` : 'Pilates', optional: !!sl.optional };
+      });
+    };
+    const weekTotals = (state) => {
+      const thisWeek = cardioThisWeek(state);
+      const liftsDone = DAY_ORDER.filter((d) => (state.completedThisWeek || {})[d]).length;
+      const miles = thisWeek.filter((c) => c.type === 'run').reduce((a, c) => a + (c.distanceMi || 0), 0);
+      const plannedMiles = Object.values(CARDIO_SLOTS).filter((sl) => sl.type === 'run' && !sl.optional)
+        .reduce((a, sl) => a + ((prescribeCardio(sl.id, state) || {}).distanceMi || 0), 0);
+      const pilates = thisWeek.filter((c) => c.type === 'pilates').length;
+      return { liftsDone, miles: Math.round(miles * 10) / 10, plannedMiles, pilates };
+    };
+    const itemSubtitle = (it) => {
+      if (it.kind === 'lift') return `${it.tpl.mainName} · ${it.sets} sets · ~${it.minutes} min`;
+      if (it.d === 'run') return it.rx ? `${it.rx.title}` : '';
+      return it.rx ? `${it.slot.focus} · ${it.rx.target}` : '';
+    };
+    const itemResult = (it) => {
+      if (!it.done) return null;
+      if (it.kind === 'lift') {
+        const am = it.lastSession && (it.lastSession.mainSets || []).find((x) => x.isAmrap && x.actualReps);
+        return am ? `Top set ${am.weight} × ${am.actualReps}` : 'Done';
+      }
+      const e = it.entry;
+      return e.type === 'run'
+        ? `${e.distanceMi} mi · ${fmtHMS(e.durationMin)} · ${fmtPace(e.durationMin / e.distanceMi)}/mi`
+        : `${Math.round(e.durationMin)} min${e.className ? ` · ${e.className}` : ''}`;
+    };
+
+    // ============================================================
+    // TRAINING BLOCK CARD (Today) — one card per discipline
+    // ============================================================
+    const BlockCard = ({ it, state, onStartLift, onOpenCardio }) => {
+      const D = DISC[it.d];
+      const [showHow, setShowHow] = useState(false);
+      const action = () => it.kind === 'lift' ? onStartLift(it.id) : onOpenCardio(it.id, it.entry);
+      let hero = null, meta = null, how = null;
+      if (it.kind === 'lift') {
+        hero = <>{it.top.weight}<span className="text-neutral-500 text-lg font-normal"> lb × {it.top.reps}{it.top.amrap ? '+' : ''}</span></>;
+        meta = [`${WEEK_SCHEMES[state.week].label.toLowerCase().replace('week', 'week')}`, `${it.sets} sets`, `~${it.minutes} min`];
+        const sup = it.tpl.supplementary;
+        how = (
+          <div className="space-y-1.5 text-[13px] text-neutral-400">
+            <div><span className="text-neutral-200">{it.tpl.mainName}</span> · 3 working sets, last one as many reps as you can</div>
+            {supSetCount(sup, state.week) > 0 && <div><span className="text-neutral-200">{sup.name}</span></div>}
+            <div>{it.tpl.accessories.map((id) => ACCESSORIES[id].name).join(' · ')}</div>
+          </div>
+        );
+      } else if (it.d === 'run') {
+        hero = it.rx ? <>{it.rx.target.replace('~', '')}</> : null;
+        meta = [it.rx && it.rx.title, it.optional ? 'optional' : null].filter(Boolean);
+        how = it.rx && <div className="text-[13px] text-neutral-400 leading-relaxed">{it.rx.detail}</div>;
+      } else {
+        hero = it.rx ? <>{it.rx.target}</> : null;
+        meta = ['Ultra 1 reformer'];
+        how = it.rx && <div className="text-[13px] text-neutral-400 leading-relaxed">{it.rx.detail}</div>;
+      }
+      return (
+        <div className={`relative overflow-hidden bg-neutral-950 border rounded-2xl mb-3 ${it.done ? 'border-neutral-800/60' : 'border-neutral-800'}`}>
+          <div className={`absolute left-0 top-0 bottom-0 w-1 ${D.solid} ${it.done ? 'opacity-30' : ''}`} />
+          <div className="p-5 pl-6">
+            <div className="flex items-center justify-between mb-3">
+              <DiscChip d={it.d} />
+              {it.done && <div className="flex items-center gap-1 text-[12px] font-medium text-green-400"><Check size={14} strokeWidth={3} /> Done</div>}
+              {!it.done && it.inProgress && <div className="text-[12px] font-medium text-orange-300">In progress</div>}
+            </div>
+            <div className={`text-[22px] font-semibold tracking-tight leading-tight ${it.done ? 'text-neutral-400' : 'text-neutral-50'}`}>{it.d === 'pilates' ? it.slot.focus : it.title}</div>
+            {it.done ? (
+              <div className="text-[14px] text-neutral-400 mt-1 font-mono">{itemResult(it)}</div>
+            ) : (
+              <>
+                {hero && <div className="font-mono text-[30px] font-bold text-neutral-50 leading-none mt-3">{hero}</div>}
+                {meta && meta.length > 0 && (
+                  <div className="flex flex-wrap gap-x-3 gap-y-1 mt-2 text-[13px] text-neutral-500">
+                    {meta.map((m, i) => <span key={i}>{m}</span>)}
+                  </div>
+                )}
+              </>
+            )}
+            {!it.done && how && (
+              <>
+                {showHow && <div className="mt-4 pt-4 border-t border-neutral-800/70">{how}</div>}
+              </>
+            )}
+            <div className="flex items-center gap-2 mt-5">
+              <button onClick={action}
+                className={`flex-1 h-11 rounded-xl text-[14px] font-semibold flex items-center justify-center gap-1.5 active:scale-[0.98] transition-transform ${
+                  it.done ? 'bg-neutral-900 text-neutral-300 border border-neutral-800' : `${D.solid} text-black`}`}>
+                {it.done
+                  ? (it.kind === 'lift' ? 'Train again' : 'Edit log')
+                  : it.kind === 'lift' ? (it.inProgress ? 'Resume session' : 'Start session') : it.d === 'run' ? 'Log run' : 'Log Pilates'}
+                {!it.done && <ArrowRight size={15} strokeWidth={2.5} />}
+              </button>
+              {!it.done && how && (
+                <button onClick={() => setShowHow((v) => !v)}
+                  className="h-11 px-4 rounded-xl border border-neutral-800 text-[13px] font-medium text-neutral-300 bg-neutral-900/60">
+                  {showHow ? 'Less' : 'Details'}
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      );
+    };
+
+    // ============================================================
+    // TODAY
+    // ============================================================
+    const TodayView = ({ state, syncStatus, onSettings, onStartLift, onOpenCardio, onCoach, onGo }) => {
+      const now = new Date();
+      const idx = todayPlanIdx();
+      const items = resolvePlanDay(idx, state);
+      const totals = weekTotals(state);
+      // A lift from earlier this week that hasn't been done yet — offer it.
+      const behind = WEEK_PLAN.slice(0, idx).flatMap((d) => d.items.filter((x) => x.lift))
+        .map((x) => x.lift).filter((l) => !(state.completedThisWeek || {})[l]);
+      const nextIdx = [1, 2, 3, 4, 5, 6, 7].map((k) => (idx + k) % 7).find((k) => WEEK_PLAN[k].items.length > 0);
+      const nextItems = nextIdx != null ? resolvePlanDay(nextIdx, state) : [];
+      const summary = state.dailyCoachSummary && state.dailyCoachSummary.date === todayKey() ? state.dailyCoachSummary.summary : null;
+      const headline = summary && (summary.verdict || summary.headline);
+      const o = state.oura && state.oura.last_sync_at && (Date.now() - state.oura.last_sync_at < 36 * 3600_000) ? state.oura : null;
+      const targets = computeMacroTargets(state.bodyStats, state.oura, computeWeeklyPace(state), computeBodyDiag(state));
+      const eaten = sumMeals((state.mealsByDate || {})[todayKey()] || []).kcal;
+      const syncDot = syncStatus === 'synced' ? 'bg-green-400' : syncStatus === 'syncing' ? 'bg-amber-400' : syncStatus === 'off' ? 'bg-neutral-600' : 'bg-red-400';
+
+      return (
+        <div className="px-5 pb-32 pt-8 max-w-2xl mx-auto">
+          <ScreenHeader
+            eyebrow={`${DAY_NAMES_LONG[idx]} · ${MONTHS[now.getMonth()]} ${now.getDate()}`}
+            title="Today"
+            right={
+              <button onClick={onSettings} className="relative w-10 h-10 rounded-full border border-neutral-800 flex items-center justify-center text-neutral-400">
+                <Settings size={18} />
+                <span className={`absolute top-0.5 right-0.5 w-2 h-2 rounded-full ${syncDot} ring-2 ring-black`} />
+              </button>
+            } />
+
+          {/* This week at a glance */}
+          <Card className="p-4 mb-3" onClick={() => onGo('plan')}>
+            <div className="flex items-center justify-between mb-4">
+              <div className="text-[13px] font-medium text-neutral-300">This week</div>
+              <div className="text-[12px] text-neutral-500">Cycle {state.cycle} · {WEEK_SCHEMES[state.week].label.toLowerCase()}</div>
+            </div>
+            <div className="grid grid-cols-3 gap-4">
+              <Meter d="strength" label="Strength" value={totals.liftsDone} target={4} />
+              <Meter d="run" label="Running" value={totals.miles} target={totals.plannedMiles} unit="mi" />
+              <Meter d="pilates" label="Pilates" value={totals.pilates} target={2} />
+            </div>
+          </Card>
+
+          {headline && (
+            <Card className="p-4 mb-3 flex items-center gap-3" onClick={onCoach}>
+              <Sparkle size={16} className="text-orange-400 shrink-0" />
+              <div className="text-[14px] text-neutral-300 leading-snug flex-1 line-clamp-2">{headline}</div>
+              <ChevronRight size={16} className="text-neutral-600 shrink-0" />
+            </Card>
+          )}
+
+          <SectionLabel>Today's training</SectionLabel>
+          {items.length === 0 ? (
+            <Card className="p-6 mb-3">
+              <Moon size={22} className="text-neutral-500 mb-3" />
+              <div className="text-[20px] font-semibold text-neutral-100">Recovery day</div>
+              <div className="text-[14px] text-neutral-500 mt-1 leading-relaxed">Walk, stretch, eat well and sleep. This is when the training turns into progress.</div>
+            </Card>
+          ) : items.map((it) => (
+            <BlockCard key={it.id} it={it} state={state} onStartLift={onStartLift} onOpenCardio={onOpenCardio} />
+          ))}
+
+          {behind.length > 0 && (
+            <Card className="p-4 mb-3 flex items-center gap-3" onClick={() => onStartLift(behind[0])}>
+              <div className={`w-9 h-9 rounded-xl ${DISC.strength.soft} flex items-center justify-center shrink-0`}><Dumbbell size={16} className="text-orange-400" /></div>
+              <div className="flex-1 min-w-0">
+                <div className="text-[14px] text-neutral-100 font-medium">Catch up: {DAY_TEMPLATES[behind[0]].name}</div>
+                <div className="text-[12px] text-neutral-500">Missed earlier this week</div>
+              </div>
+              <ArrowRight size={16} className="text-orange-400" />
+            </Card>
+          )}
+
+          {nextItems.length > 0 && (
+            <>
+              <SectionLabel>Up next · {DAY_NAMES_LONG[nextIdx]}</SectionLabel>
+              <Card className="divide-y divide-neutral-800/70" onClick={() => onGo('plan')}>
+                {nextItems.map((it) => {
+                  const D = DISC[it.d];
+                  return (
+                    <div key={it.id} className="flex items-center gap-3 px-4 py-3">
+                      <div className={`w-1.5 h-1.5 rounded-full ${D.solid}`} />
+                      <div className="text-[14px] text-neutral-200 flex-1">{it.title}</div>
+                      <div className="text-[13px] text-neutral-500 truncate max-w-[55%] text-right">{it.kind === 'lift' ? it.tpl.mainName : it.rx && it.rx.target}</div>
+                    </div>
+                  );
+                })}
+              </Card>
+            </>
+          )}
+
+          <SectionLabel>Body & fuel</SectionLabel>
+          <div className="grid grid-cols-3 gap-2">
+            <Card className="p-3" onClick={() => onGo('progress', 'body')}>
+              <div className="text-[11px] text-neutral-500 mb-1">Readiness</div>
+              <div className="font-mono text-xl font-bold text-neutral-100">{o && o.readiness_score_today != null ? o.readiness_score_today : '—'}</div>
+            </Card>
+            <Card className="p-3" onClick={() => onGo('progress', 'body')}>
+              <div className="text-[11px] text-neutral-500 mb-1">Sleep</div>
+              <div className="font-mono text-xl font-bold text-neutral-100">{o && o.sleep_score_yesterday != null ? o.sleep_score_yesterday : '—'}</div>
+            </Card>
+            <Card className="p-3" onClick={() => onGo('diet')}>
+              <div className="text-[11px] text-neutral-500 mb-1">Cal left</div>
+              <div className="font-mono text-xl font-bold text-neutral-100">{Math.max(0, Math.round(targets.kcal - eaten))}</div>
+            </Card>
+          </div>
+        </div>
+      );
+    };
+
+    // ============================================================
+    // PLAN (week)
+    // ============================================================
+    const PlanView = ({ state, onStartLift, onOpenCardio, onLogExtra }) => {
+      const [openIdx, setOpenIdx] = useState(null);
+      const todayIdx = todayPlanIdx();
+      const mon = parseDateKey(weekStartKey());
+      const sun = new Date(mon); sun.setDate(sun.getDate() + 6);
+      const totals = weekTotals(state);
+      const openItems = openIdx != null ? resolvePlanDay(openIdx, state) : [];
+      const waves = [1, 2, 3, 4].map((w) => ({ w, label: ['5s', '3s', 'PR', 'Deload'][w - 1] }));
+      return (
+        <div className="px-5 pb-32 pt-8 max-w-2xl mx-auto">
+          <ScreenHeader eyebrow={`${MONTHS[mon.getMonth()]} ${mon.getDate()} – ${MONTHS[sun.getMonth()]} ${sun.getDate()}`} title="This week" />
+
+          <Card className="p-4 mb-6">
+            <div className="grid grid-cols-3 gap-4">
+              <Meter d="strength" label="Strength" value={totals.liftsDone} target={4} />
+              <Meter d="run" label="Running" value={totals.miles} target={totals.plannedMiles} unit="mi" />
+              <Meter d="pilates" label="Pilates" value={totals.pilates} target={2} />
+            </div>
+          </Card>
+
+          <div className="space-y-2">
+            {WEEK_PLAN.map((day, idx) => {
+              const items = resolvePlanDay(idx, state);
+              const date = new Date(mon); date.setDate(date.getDate() + idx);
+              const isToday = idx === todayIdx;
+              const allDone = items.length > 0 && items.filter((x) => !x.optional).every((x) => x.done);
+              return (
+                <button key={day.day} onClick={() => items.length && setOpenIdx(idx)}
+                  className={`w-full text-left flex items-stretch gap-4 rounded-2xl border px-4 py-3.5 active:scale-[0.99] transition-transform ${
+                    isToday ? 'border-neutral-600 bg-neutral-900/60' : 'border-neutral-800/80 bg-neutral-950'}`}>
+                  <div className="w-10 shrink-0 text-center">
+                    <div className={`text-[11px] font-semibold tracking-wider uppercase ${isToday ? 'text-neutral-100' : 'text-neutral-500'}`}>{day.day}</div>
+                    <div className={`font-mono text-xl font-bold leading-tight ${isToday ? 'text-neutral-50' : allDone ? 'text-neutral-600' : 'text-neutral-300'}`}>{date.getDate()}</div>
+                  </div>
+                  <div className="flex-1 min-w-0 space-y-1.5 self-center">
+                    {items.length === 0 && <div className="text-[14px] text-neutral-600">Rest</div>}
+                    {items.map((it) => {
+                      const D = DISC[it.d];
+                      return (
+                        <div key={it.id} className="flex items-center gap-2.5">
+                          {it.done
+                            ? <Check size={13} strokeWidth={3} className="text-green-400 shrink-0" />
+                            : <div className={`w-2 h-2 rounded-full shrink-0 mx-[2.5px] ${D.solid} ${it.optional ? 'opacity-40' : ''}`} />}
+                          <div className={`text-[14px] truncate ${it.done ? 'text-neutral-500' : it.optional ? 'text-neutral-500' : 'text-neutral-100'}`}>
+                            {it.title}
+                            <span className="text-neutral-500"> · {it.kind === 'lift' ? it.tpl.mainName : it.d === 'run' ? (it.rx ? it.rx.target.replace('~', '') : '') : it.slot.focus.split(' &')[0].split(',')[0]}</span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  {items.length > 0 && <ChevronRight size={16} className="text-neutral-600 self-center shrink-0" />}
+                </button>
+              );
+            })}
+          </div>
+
+          <button onClick={onLogExtra}
+            className="w-full mt-3 h-12 rounded-2xl border border-dashed border-neutral-700 text-[14px] font-medium text-neutral-400 flex items-center justify-center gap-1.5">
+            <Plus size={15} /> Log an extra run or Pilates
+          </button>
+
+          <SectionLabel>Strength cycle {state.cycle}</SectionLabel>
+          <Card className="p-4">
+            <div className="grid grid-cols-4 gap-2 mb-3">
+              {waves.map(({ w, label }) => (
+                <div key={w} className={`rounded-xl py-2.5 text-center border ${w === state.week ? 'border-orange-500/50 bg-orange-500/10' : w < state.week ? 'border-neutral-800 bg-neutral-900/50' : 'border-neutral-800'}`}>
+                  <div className={`text-[11px] ${w === state.week ? 'text-orange-300' : 'text-neutral-500'}`}>Week {w}</div>
+                  <div className={`text-[14px] font-semibold ${w === state.week ? 'text-neutral-50' : w < state.week ? 'text-neutral-500' : 'text-neutral-300'}`}>{label}</div>
+                </div>
+              ))}
+            </div>
+            <div className="text-[13px] text-neutral-500 leading-relaxed">
+              {state.week === 3 ? 'PR week: the last set on each lift decides whether its training max goes up next cycle.'
+                : state.week === 4 ? 'Deload: lighter lifting and a shorter long run so everything absorbs the last three weeks.'
+                : 'Training maxes move at the end of the cycle, based on your PR-week top sets.'}
+            </div>
+          </Card>
+
+          <Sheet open={openIdx != null} onClose={() => setOpenIdx(null)}>
+            {openIdx != null && (
+              <>
+                <div className="font-display text-3xl tracking-wide text-neutral-50 mb-5">{DAY_NAMES_LONG[openIdx]}</div>
+                {openItems.map((it) => (
+                  <BlockCard key={it.id} it={it} state={state}
+                    onStartLift={(id) => { setOpenIdx(null); onStartLift(id); }}
+                    onOpenCardio={(id, e) => { setOpenIdx(null); onOpenCardio(id, e); }} />
+                ))}
+              </>
+            )}
+          </Sheet>
+        </div>
+      );
+    };
+
+    // ============================================================
+    // CARDIO LOG SHEET (runs + Pilates)
+    // ============================================================
+    const CardioLogForm = ({ open, initial, onCancel, onSave, onDelete }) => {
+      const [f, setF] = useState(null);
+      useEffect(() => {
+        if (!open) return;
+        const i = initial || {};
+        setF({
+          type: i.type || 'run',
+          date: i.date || todayKey(),
+          distance: i.distanceMi != null ? String(i.distanceMi) : '',
+          duration: i.type === 'pilates'
+            ? (i.durationMin != null ? String(Math.round(i.durationMin)) : '')
+            : (i.durationMin != null ? fmtDuration(i.durationMin) : ''),
+          where: i.where || 'tread',
+          rpe: i.rpe != null ? i.rpe : null,
+          className: i.className || '',
+          notes: i.notes || '',
+        });
+      }, [open, initial]);
+      if (!open || !f) return null;
+      const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
+      const isRun = f.type === 'run';
+      const D = DISC[isRun ? 'run' : 'pilates'];
+      const dist = parseFloat(f.distance);
+      const durMin = isRun ? parseDuration(f.duration) : parseFloat(f.duration);
+      const pace = isRun && dist > 0 && durMin > 0 ? durMin / dist : null;
+      const valid = isRun ? (dist > 0 && durMin > 0) : durMin > 0;
+      const slot = initial && initial.slot ? CARDIO_SLOTS[initial.slot] : null;
+      const editing = !!(initial && initial.loggedAt);
+      const save = () => {
+        if (!valid) return;
+        onSave({
+          ...(initial || {}),
+          id: (initial && initial.id) || `c-${Date.now().toString(36)}`,
+          type: f.type,
+          slot: slot && slot.type === f.type ? slot.id : null,
+          kind: isRun ? ((slot && slot.kind) || (initial && initial.kind) || 'easy') : undefined,
+          focus: !isRun ? ((slot && slot.focus) || (initial && initial.focus) || null) : undefined,
+          date: f.date || todayKey(),
+          distanceMi: isRun ? Math.round(dist * 100) / 100 : null,
+          durationMin: Math.round(durMin * 60) / 60, // whole seconds
+          where: isRun ? f.where : null,
+          rpe: f.rpe != null ? f.rpe : null,
+          className: !isRun ? f.className.trim() : null,
+          notes: f.notes.trim(),
+          loggedAt: (initial && initial.loggedAt) || new Date().toISOString(),
+          source: 'manual',
+        });
+      };
+      const field = 'w-full bg-neutral-900 border border-neutral-800 focus:border-neutral-500 rounded-xl px-4 h-12 text-[16px] text-neutral-50 outline-none';
+      const label = 'text-[12px] font-medium text-neutral-500 mb-1.5 block';
+      const Toggle = ({ value, options, onPick }) => (
+        <div className="flex p-1 bg-neutral-900 border border-neutral-800 rounded-xl">
+          {options.map(([id, l]) => (
+            <button key={id} onClick={() => onPick(id)}
+              className={`flex-1 h-9 rounded-lg text-[13px] font-medium ${value === id ? 'bg-neutral-100 text-black' : 'text-neutral-400'}`}>{l}</button>
+          ))}
+        </div>
+      );
+      return (
+        <Sheet open onClose={onCancel}>
+          <div className="flex items-center justify-between mb-1">
+            <DiscChip d={isRun ? 'run' : 'pilates'}>{editing ? 'Edit' : 'Log'} {isRun ? 'run' : 'Pilates'}</DiscChip>
+          </div>
+          <div className="text-[22px] font-semibold text-neutral-50 mb-5">
+            {slot ? (slot.type === 'run' ? slot.label.replace(' (optional)', '') : slot.focus) : isRun ? 'Run' : 'Pilates'}
+          </div>
+          {!slot && !editing && (
+            <div className="mb-4"><Toggle value={f.type} options={[['run', 'Run'], ['pilates', 'Pilates']]} onPick={(v) => set('type', v)} /></div>
+          )}
+          <div className="space-y-4">
+            {isRun ? (
+              <>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className={label}>Distance (mi)</label>
+                    <input type="number" inputMode="decimal" step="0.01" value={f.distance} onChange={(e) => set('distance', e.target.value)} className={field + ' font-mono'} placeholder="4.0" />
+                  </div>
+                  <div>
+                    <label className={label}>Time</label>
+                    <input type="text" inputMode="numeric" value={f.duration} onChange={(e) => set('duration', e.target.value)} className={field + ' font-mono'} placeholder="42:30" />
+                  </div>
+                </div>
+                <div className={`rounded-xl ${D.soft} border ${D.ring} px-4 py-3 flex items-center justify-between`}>
+                  <span className="text-[13px] text-neutral-400">Pace</span>
+                  <span className={`font-mono font-bold text-lg ${D.text}`}>{pace ? `${fmtPace(pace)} /mi` : '—'}</span>
+                </div>
+                <div>
+                  <label className={label}>Where</label>
+                  <Toggle value={f.where} options={[['tread', 'Treadmill'], ['road', 'Road']]} onPick={(v) => set('where', v)} />
+                </div>
+                <div>
+                  <label className={label}>How hard did it feel?</label>
+                  <div className="grid grid-cols-5 gap-1.5">
+                    {[[2, 'Easy'], [4, 'Steady'], [6, 'Firm'], [8, 'Hard'], [10, 'Max']].map(([v, l]) => (
+                      <button key={v} onClick={() => set('rpe', f.rpe === v ? null : v)}
+                        className={`h-10 rounded-lg text-[12px] font-medium border ${f.rpe === v ? `${D.solid} text-black border-transparent` : 'bg-neutral-900 text-neutral-400 border-neutral-800'}`}>{l}</button>
+                    ))}
+                  </div>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className={label}>Minutes</label>
+                    <input type="number" inputMode="numeric" value={f.duration} onChange={(e) => set('duration', e.target.value)} className={field + ' font-mono'} placeholder="50" />
+                  </div>
+                  <div>
+                    <label className={label}>Date</label>
+                    <input type="date" value={f.date} onChange={(e) => set('date', e.target.value)} className={field} />
+                  </div>
+                </div>
+                <div>
+                  <label className={label}>Class</label>
+                  <input type="text" value={f.className} onChange={(e) => set('className', e.target.value)} className={field} placeholder="Name of the iFit class" />
+                </div>
+              </>
+            )}
+            {isRun && (
+              <div>
+                <label className={label}>Date</label>
+                <input type="date" value={f.date} onChange={(e) => set('date', e.target.value)} className={field} />
+              </div>
+            )}
+            <div>
+              <label className={label}>Notes</label>
+              <textarea rows={2} value={f.notes} onChange={(e) => set('notes', e.target.value)}
+                className="w-full bg-neutral-900 border border-neutral-800 focus:border-neutral-500 rounded-xl px-4 py-3 text-[15px] text-neutral-50 outline-none"
+                placeholder={isRun ? 'How did the legs feel?' : 'Back, hamstrings, what felt tight…'} />
+            </div>
+          </div>
+          <button onClick={save} disabled={!valid}
+            className={`w-full h-12 rounded-xl mt-6 text-[15px] font-semibold ${valid ? `${D.solid} text-black` : 'bg-neutral-800 text-neutral-500'}`}>
+            {editing ? 'Save changes' : 'Save'}
+          </button>
+          {onDelete && editing && (
+            <button onClick={() => { if (window.confirm('Delete this entry?')) onDelete(initial.id); }}
+              className="w-full mt-2 h-11 text-[14px] text-red-400/80">Delete</button>
+          )}
+        </Sheet>
+      );
+    };
+
+    // ============================================================
+    // PROGRESS — Strength / Running / Pilates / Body
+    // ============================================================
+    // Per-session best e1RM for a lift (AMRAP sets), oldest first.
+    const e1rmSeries = (history, lift) => (history || [])
+      .filter((h) => h.mainLift === lift && !h.isVolume && h.completedAt)
+      .map((h) => {
+        let best = 0;
+        (h.mainSets || []).forEach((st) => { if (st.isAmrap && st.actualReps && st.weight) best = Math.max(best, estimate1RM(st.weight, st.actualReps)); });
+        return best ? { ts: new Date(h.completedAt).getTime(), value: best } : null;
+      })
+      .filter(Boolean)
+      .sort((a, b) => a.ts - b.ts);
+
+    const StatTile = ({ label, value, sub, accent }) => (
+      <div className="bg-neutral-900/60 border border-neutral-800/70 rounded-xl p-3 min-w-0">
+        <div className="text-[11px] text-neutral-500 mb-1 truncate">{label}</div>
+        <div className={`font-mono text-lg font-bold leading-tight ${accent || 'text-neutral-50'}`}>{value}</div>
+        {sub && <div className="text-[11px] text-neutral-500 mt-0.5 truncate">{sub}</div>}
+      </div>
+    );
+    const Insight = ({ d, children }) => (
+      <div className={`rounded-2xl border ${DISC[d].ring} ${DISC[d].soft} p-4 mb-3 flex gap-3`}>
+        <Sparkle size={16} className={`${DISC[d].text} shrink-0 mt-0.5`} />
+        <div className="text-[14px] text-neutral-200 leading-relaxed">{children}</div>
+      </div>
+    );
+    const BarChart8 = ({ values, labels, d, target, fmt = (v) => v }) => {
+      const max = Math.max(target || 0, ...values, 1);
+      return (
+        <div>
+          <div className="relative flex items-end gap-1.5 h-28">
+            {target ? <div className="absolute left-0 right-0 border-t border-dashed border-neutral-700" style={{ bottom: `${(target / max) * 100}%` }} /> : null}
+            {values.map((v, i) => (
+              <div key={i} className="flex-1 flex flex-col items-center justify-end h-full">
+                <div className="text-[10px] font-mono text-neutral-500 mb-1">{v ? fmt(v) : ''}</div>
+                <div className={`w-full rounded-md ${DISC[d].bar} ${i === values.length - 1 ? '' : 'opacity-50'}`}
+                     style={{ height: `${(v / max) * 100}%`, minHeight: v ? 3 : 0 }} />
+              </div>
+            ))}
+          </div>
+          <div className="flex gap-1.5 mt-2">
+            {labels.map((l, i) => <div key={i} className="flex-1 text-center text-[10px] text-neutral-600">{l}</div>)}
+          </div>
+        </div>
+      );
+    };
+    const last8Weeks = (log, fn) => {
+      const mon = parseDateKey(weekStartKey());
+      return Array.from({ length: 8 }, (_, i) => {
+        const start = new Date(mon); start.setDate(start.getDate() - 7 * (7 - i));
+        const end = new Date(start); end.setDate(end.getDate() + 7);
+        const sk = dateKey(start), ek = dateKey(end);
+        return { label: `${start.getMonth() + 1}/${start.getDate()}`, value: fn(log.filter((c) => c.date >= sk && c.date < ek)) };
+      });
+    };
+    // Riegel: T2 = T1 × (D2/D1)^1.06, from runs of 3+ mi in the last 8 weeks.
+    const HALF_MI = 13.109;
+    const GOAL_HALF_MIN = 8 * HALF_MI;
+    const predictHalf = (runs) => {
+      const cut = new Date(); cut.setDate(cut.getDate() - 56);
+      const ck = dateKey(cut);
+      let best = null;
+      runs.filter((r) => r.date >= ck && r.distanceMi >= 3).forEach((r) => {
+        const t = r.durationMin * Math.pow(HALF_MI / r.distanceMi, 1.06);
+        if (!best || t < best.t) best = { t, from: r };
+      });
+      return best;
+    };
+
+    const LiftRow = ({ lift, label, state }) => {
+      const bs = state.bodyStats || {};
+      const series = e1rmSeries(state.history, lift);
+      const best = getBestE1RM(state.history, lift);
+      const tm = (state.trainingMaxes || {})[lift];
+      const std = adjustedStandards(lift, bs.weight, bs.age);
+      const val = best || tm;
+      const pct = std && val ? computePercentile(val, std) : null;
+      const next = std && val ? nextMilestone(val, std) : null;
+      const first = series[0], last = series[series.length - 1];
+      const change = series.length >= 2 ? last.value - first.value : null;
+      return (
+        <Card className="p-4 mb-2">
+          <div className="flex items-start justify-between gap-3 mb-3">
+            <div>
+              <div className="text-[15px] font-semibold text-neutral-100">{label}</div>
+              <div className="text-[12px] text-neutral-500 mt-0.5">Training max {tm} lb{pct != null ? ` · ${pct}${ordSuffix(pct)} percentile` : ''}</div>
+            </div>
+            <div className="text-right">
+              <div className="font-mono text-2xl font-bold text-neutral-50 leading-none">{best || '—'}</div>
+              <div className="text-[11px] text-neutral-500 mt-1">est. 1RM</div>
+            </div>
+          </div>
+          {series.length >= 2 ? <Sparkline points={series} color={DISC.strength.hex} height={40} /> : <div className="h-10 flex items-center text-[12px] text-neutral-600">Trend appears after two top sets</div>}
+          <div className="flex items-center justify-between mt-2 text-[12px]">
+            <span className={change > 0 ? 'text-green-400' : change < 0 ? 'text-red-400' : 'text-neutral-500'}>
+              {change != null ? `${change > 0 ? '+' : ''}${change} lb since ${new Date(first.ts).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}` : ''}
+            </span>
+            {next && <span className="text-neutral-500">Next: {next.value} lb → {next.pct}{ordSuffix(next.pct)}</span>}
+          </div>
+        </Card>
+      );
+    };
+
+    const StrengthProgress = ({ state, onOpenSession }) => {
+      const overall = overallStrengthPercentile(state);
+      const lifts = [['bench', 'Bench Press'], ['squat', 'Back Squat'], ['deadlift', 'Hex Bar Deadlift'], ['press', 'Military Press']];
+      // Insight: biggest e1RM gain over 90 days, and any lift without a new best in 8 weeks.
+      const now = Date.now();
+      const gains = lifts.map(([l, n]) => {
+        const sr = e1rmSeries(state.history, l);
+        const old = sr.filter((p) => p.ts <= now - 90 * 86_400_000).pop() || sr[0];
+        const latestBest = sr.reduce((m, p) => Math.max(m, p.value), 0);
+        const recentBest = sr.filter((p) => p.ts > now - 56 * 86_400_000).reduce((m, p) => Math.max(m, p.value), 0);
+        const priorBest = sr.filter((p) => p.ts <= now - 56 * 86_400_000).reduce((m, p) => Math.max(m, p.value), 0);
+        return { l, n, gain: old && sr.length >= 2 ? latestBest - old.value : null, stalled: priorBest > 0 && recentBest > 0 && recentBest <= priorBest };
+      });
+      const top = gains.filter((g) => g.gain > 0).sort((a, b) => b.gain - a.gain)[0];
+      const stalled = gains.filter((g) => g.stalled).map((g) => g.n);
+      const recent = (state.history || []).slice(0, 6);
+      const series = buildExerciseSeries(state.history);
+      const accRows = Array.from(series.entries()).filter(([k, v]) => !k.startsWith('main:') && v.points.length >= 1)
+        .map(([k, v]) => { const def = ACCESSORIES[k.replace(/^acc:/, '')]; return { k, v: { ...v, name: def ? def.name : v.name }, def }; })
+        .filter((r) => !r.def || !r.def.retired);
+      return (
+        <>
+          <Card className="p-5 mb-3">
+            <div className="text-[12px] text-neutral-500 mb-2">Overall strength</div>
+            <div className="flex items-baseline gap-2">
+              <div className="font-mono text-5xl font-bold text-neutral-50 leading-none">{overall ?? '—'}<span className="text-xl">{overall != null ? ordSuffix(overall) : ''}</span></div>
+              <div className="text-[13px] font-semibold text-orange-300 uppercase tracking-wider">{overall != null ? percentileLabel(overall) : ''}</div>
+            </div>
+            <div className="text-[13px] text-neutral-500 mt-2">Percentile vs men aged {(state.bodyStats || {}).age || 45} at {(state.bodyStats || {}).weight || 185} lb, averaged over your four lifts.</div>
+          </Card>
+          {(top || stalled.length > 0) && (
+            <Insight d="strength">
+              {top ? <><b className="text-neutral-50">{top.n}</b> is your fastest mover: +{top.gain} lb estimated 1RM in 90 days. </> : null}
+              {stalled.length > 0 ? <>{stalled.join(' and ')} {stalled.length > 1 ? "haven't" : "hasn't"} set a new best in 8 weeks — the extra FSL volume is aimed at exactly that.</> : null}
+            </Insight>
+          )}
+          <SectionLabel>Main lifts</SectionLabel>
+          {lifts.map(([l, n]) => <LiftRow key={l} lift={l} label={n} state={state} />)}
+
+          {accRows.length > 0 && (
+            <>
+              <SectionLabel>Accessories</SectionLabel>
+              <Card className="divide-y divide-neutral-800/70">
+                {accRows.map(({ k, v }) => {
+                  const pts = v.points; const lastP = pts[pts.length - 1]; const firstP = pts[0];
+                  const up = pts.length >= 2 && lastP.value > firstP.value;
+                  const id = k.replace(/^acc:/, '');
+                  const log = (state.accessoryLog || {})[id];
+                  return (
+                    <div key={k} className="flex items-center gap-3 px-4 py-3">
+                      <div className="flex-1 min-w-0">
+                        <div className="text-[14px] text-neutral-200 truncate">{v.name}</div>
+                        <div className="text-[12px] text-neutral-500">{pts.length} session{pts.length === 1 ? '' : 's'}{log && log.hitTopOnAllSets ? ' · ready to go up' : ''}</div>
+                      </div>
+                      <div className="w-16"><Sparkline points={pts} color="#737373" height={22} fill={false} /></div>
+                      <div className="font-mono text-[14px] text-neutral-100 w-16 text-right">
+                        {v.type === 'acc' && log ? `${log.weight} lb` : (lastP.label || '')}
+                        {up && <ArrowUp size={11} className="inline text-green-400 ml-0.5" strokeWidth={3} />}
+                      </div>
+                    </div>
+                  );
+                })}
+              </Card>
+            </>
+          )}
+
+          {recent.length > 0 && (
+            <>
+              <SectionLabel>Recent sessions</SectionLabel>
+              <Card className="divide-y divide-neutral-800/70">
+                {recent.map((h, i) => {
+                  const am = (h.mainSets || []).find((x) => x.isAmrap && x.actualReps);
+                  return (
+                    <button key={i} onClick={() => onOpenSession(h)} className="w-full text-left flex items-center gap-3 px-4 py-3">
+                      <div className="flex-1 min-w-0">
+                        <div className="text-[14px] text-neutral-200">{(DAY_TEMPLATES[h.dayId] || {}).name || h.name}</div>
+                        <div className="text-[12px] text-neutral-500">{h.completedAt ? new Date(h.completedAt).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' }) : ''} · C{h.cycle} W{h.week}</div>
+                      </div>
+                      {am && <div className="font-mono text-[14px] text-orange-300">{am.weight}×{am.actualReps}</div>}
+                      <ChevronRight size={15} className="text-neutral-600" />
+                    </button>
+                  );
+                })}
+              </Card>
+            </>
+          )}
+        </>
+      );
+    };
+
+    const RunningProgress = ({ state, onEdit }) => {
+      const log = state.cardioLog || [];
+      const runs = log.filter((c) => c.type === 'run' && c.distanceMi > 0 && c.durationMin > 0).sort((a, b) => (a.date < b.date ? 1 : -1));
+      if (runs.length === 0) {
+        return <Card className="p-6 text-[14px] text-neutral-500">Log your first run from Today or Plan. Weekly mileage, long-run progress and a predicted half-marathon time will show up here.</Card>;
+      }
+      const weeks = last8Weeks(runs, (xs) => Math.round(xs.reduce((a, c) => a + c.distanceMi, 0) * 10) / 10);
+      const pred = predictHalf(runs);
+      const gap = pred ? pred.t - GOAL_HALF_MIN : null;
+      const longs = runs.filter((r) => r.kind === 'long' || r.slot === 'long-sat' || r.distanceMi >= 8).slice(0, 8).reverse();
+      const easy = runs.filter((r) => r.kind !== 'quality');
+      const paceByWeek = last8Weeks(easy, (xs) => {
+        const d = xs.reduce((a, c) => a + c.distanceMi, 0);
+        return d ? xs.reduce((a, c) => a + c.durationMin, 0) / d : 0;
+      });
+      // Trend and insight use completed weeks only; the current week is partial.
+      const doneWeeks = paceByWeek.slice(0, 7);
+      const pacePts = doneWeeks.map((w, i) => ({ ts: i, value: w.value })).filter((p) => p.value > 0).map((p) => ({ ...p, value: -p.value }));
+      const lastDone = [...doneWeeks].reverse().find((w) => w.value > 0);
+      const thisWkPace = paceByWeek[7].value || (lastDone && lastDone.value);
+      const firstPace = doneWeeks.find((w) => w.value > 0);
+      const paceDelta = firstPace && lastDone && firstPace !== lastDone ? (firstPace.value - lastDone.value) * 60 : null;
+      const longest = runs.reduce((m, r) => Math.max(m, r.distanceMi), 0);
+      return (
+        <>
+          <Card className="p-5 mb-3">
+            <div className="flex items-center justify-between mb-2">
+              <div className="text-[12px] text-neutral-500">Predicted half marathon</div>
+              <div className="text-[12px] text-neutral-500 flex items-center gap-1"><Target size={12} /> Goal 1:44:53</div>
+            </div>
+            <div className="font-mono text-5xl font-bold text-neutral-50 leading-none">{pred ? fmtHMS(pred.t) : '—'}</div>
+            {pred && (
+              <>
+                <div className="text-[13px] text-neutral-400 mt-2">
+                  {fmtPace(pred.t / HALF_MI)}/mi · {gap > 0 ? <span className="text-sky-300">{fmtHMS(gap)} to go</span> : <span className="text-green-400">goal pace reached</span>}
+                </div>
+                <div className="h-1.5 bg-neutral-800 rounded-full mt-4 overflow-hidden">
+                  <div className="h-full bg-sky-400 rounded-full" style={{ width: `${Math.max(5, Math.min(100, (GOAL_HALF_MIN / pred.t) * 100))}%` }} />
+                </div>
+                <div className="text-[11px] text-neutral-600 mt-2">Estimated from your {pred.from.distanceMi} mi run on {parseDateKey(pred.from.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} (best effort in the last 8 weeks).</div>
+              </>
+            )}
+          </Card>
+          {paceDelta != null && Math.abs(paceDelta) >= 5 && (
+            <Insight d="run">
+              Your easy runs are <b className="text-neutral-50">{Math.round(Math.abs(paceDelta))} s/mi {paceDelta > 0 ? 'faster' : 'slower'}</b> than {pacePts.length} weeks ago
+              {paceDelta > 0 ? ' at the same effort — your aerobic base is building.' : '. Normal while the long run is growing; keep them conversational.'}
+            </Insight>
+          )}
+          <div className="grid grid-cols-3 gap-2 mb-3">
+            <StatTile label="This week" value={`${weeks[7].value} mi`} />
+            <StatTile label="Longest run" value={`${longest} mi`} sub="target 13" />
+            <StatTile label="Easy pace" value={thisWkPace ? fmtPace(thisWkPace) : '—'} sub="per mile" />
+          </div>
+          <SectionLabel>Weekly miles</SectionLabel>
+          <Card className="p-4"><BarChart8 d="run" values={weeks.map((w) => w.value)} labels={weeks.map((w) => w.label)} fmt={(v) => Math.round(v)} /></Card>
+          {longs.length >= 2 && (
+            <>
+              <SectionLabel right={<span className="text-[12px] text-neutral-500">to 13.1 mi</span>}>Long run build</SectionLabel>
+              <Card className="p-4">
+                <div className="flex items-end gap-2 h-24">
+                  {longs.map((r) => (
+                    <div key={r.id} className="flex-1 flex flex-col items-center justify-end h-full">
+                      <div className="text-[10px] font-mono text-neutral-400 mb-1">{r.distanceMi}</div>
+                      <div className="w-full rounded-md bg-sky-400/70" style={{ height: `${(r.distanceMi / 13.1) * 100}%` }} />
+                    </div>
+                  ))}
+                </div>
+              </Card>
+            </>
+          )}
+          {pacePts.length >= 2 && (
+            <>
+              <SectionLabel right={<span className="text-[12px] text-neutral-500">higher is faster</span>}>Easy pace trend</SectionLabel>
+              <Card className="p-4"><Sparkline points={pacePts} color={DISC.run.hex} height={56} /></Card>
+            </>
+          )}
+          <SectionLabel>Recent runs</SectionLabel>
+          <Card className="divide-y divide-neutral-800/70">
+            {runs.slice(0, 10).map((r) => (
+              <button key={r.id} onClick={() => onEdit(r)} className="w-full text-left flex items-center gap-3 px-4 py-3">
+                <div className="flex-1 min-w-0">
+                  <div className="text-[14px] text-neutral-200 truncate">{cardioEntryTitle(r)}</div>
+                  <div className="text-[12px] text-neutral-500">{parseDateKey(r.date).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })} · {fmtHMS(r.durationMin)}</div>
+                </div>
+                <div className="text-right">
+                  <div className="font-mono text-[14px] text-sky-300">{r.distanceMi} mi</div>
+                  <div className="font-mono text-[11px] text-neutral-500">{fmtPace(r.durationMin / r.distanceMi)}/mi</div>
+                </div>
+              </button>
+            ))}
+          </Card>
+        </>
+      );
+    };
+
+    const PilatesProgress = ({ state, onEdit }) => {
+      const sessions = (state.cardioLog || []).filter((c) => c.type === 'pilates').sort((a, b) => (a.date < b.date ? 1 : -1));
+      if (sessions.length === 0) {
+        return <Card className="p-6 text-[14px] text-neutral-500">Log Pilates sessions with the class name. You'll see your weekly consistency and which classes you come back to.</Card>;
+      }
+      const weeks = last8Weeks(sessions, (xs) => xs.length);
+      // Streak of consecutive completed weeks (before this one) hitting 2 sessions.
+      let streak = 0;
+      for (let i = 6; i >= 0; i--) { if (weeks[i].value >= 2) streak++; else break; }
+      if (weeks[7].value >= 2) streak++;
+      const cut = new Date(); cut.setDate(cut.getDate() - 28);
+      const minutes28 = sessions.filter((s) => s.date >= dateKey(cut)).reduce((a, s) => a + s.durationMin, 0);
+      const counts = {};
+      sessions.forEach((s) => { if (s.className) counts[s.className] = (counts[s.className] || 0) + 1; });
+      const favs = Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 5);
+      const backNotes = sessions.filter((s) => /back/i.test(s.notes || '')).length;
+      return (
+        <>
+          <div className="grid grid-cols-3 gap-2 mb-3">
+            <StatTile label="This week" value={`${weeks[7].value}/2`} accent="text-violet-300" />
+            <StatTile label="2× streak" value={`${streak} wk`} />
+            <StatTile label="Last 4 weeks" value={`${Math.round(minutes28 / 60 * 10) / 10} h`} />
+          </div>
+          {streak >= 3 && <Insight d="pilates"><b className="text-neutral-50">{streak} weeks</b> in a row at twice a week. That consistency is what keeps the low back quiet.</Insight>}
+          <SectionLabel right={<span className="text-[12px] text-neutral-500">target 2 / week</span>}>Sessions per week</SectionLabel>
+          <Card className="p-4"><BarChart8 d="pilates" values={weeks.map((w) => w.value)} labels={weeks.map((w) => w.label)} target={2} /></Card>
+          {favs.length > 0 && (
+            <>
+              <SectionLabel>Your classes</SectionLabel>
+              <Card className="divide-y divide-neutral-800/70">
+                {favs.map(([n, c]) => (
+                  <div key={n} className="flex items-center justify-between px-4 py-3">
+                    <div className="text-[14px] text-neutral-200 truncate">{n}</div>
+                    <div className="text-[13px] font-mono text-violet-300">{c}×</div>
+                  </div>
+                ))}
+              </Card>
+            </>
+          )}
+          <SectionLabel>Recent sessions</SectionLabel>
+          <Card className="divide-y divide-neutral-800/70">
+            {sessions.slice(0, 10).map((s) => (
+              <button key={s.id} onClick={() => onEdit(s)} className="w-full text-left flex items-center gap-3 px-4 py-3">
+                <div className="flex-1 min-w-0">
+                  <div className="text-[14px] text-neutral-200 truncate">{s.className || s.focus || 'Pilates'}</div>
+                  <div className="text-[12px] text-neutral-500">{parseDateKey(s.date).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })}{s.focus && s.className ? ` · ${s.focus}` : ''}</div>
+                </div>
+                <div className="font-mono text-[14px] text-violet-300">{Math.round(s.durationMin)} min</div>
+              </button>
+            ))}
+          </Card>
+          {backNotes > 0 && <div className="text-[12px] text-neutral-600 mt-3">{backNotes} session note{backNotes > 1 ? 's' : ''} mention your back.</div>}
+        </>
+      );
+    };
+
+    const ProgressView = ({ state, initialTab, onOpenSettings, onOpenBodyScan, onOpenDiet, onEditCardio, onUpdateState }) => {
+      const [tab, setTab] = useState(initialTab || 'strength');
+      const [selected, setSelected] = useState(null);
+      useEffect(() => { if (initialTab) setTab(initialTab); }, [initialTab]);
+      if (selected) return <SessionDetailView session={selected} onBack={() => setSelected(null)} state={state} onUpdateState={onUpdateState} />;
+      return (
+        <div className="px-5 pb-32 pt-8 max-w-2xl mx-auto">
+          <ScreenHeader eyebrow={`Cycle ${state.cycle} · Week ${state.week}`} title="Progress" />
+          <Segmented value={tab} onChange={setTab} options={[['strength', 'Strength'], ['run', 'Running'], ['pilates', 'Pilates'], ['body', 'Body']]} />
+          {tab === 'strength' && <StrengthProgress state={state} onOpenSession={setSelected} />}
+          {tab === 'run' && <RunningProgress state={state} onEdit={onEditCardio} />}
+          {tab === 'pilates' && <PilatesProgress state={state} onEdit={onEditCardio} />}
+          {tab === 'body' && (
+            <div className="space-y-3">
+              <BodyCompositionCard state={state} onOpenSettings={onOpenSettings} onOpenBodyScan={onOpenBodyScan} />
+              <CalorieBalanceCard state={state} onOpenDiet={onOpenDiet} />
+              <RecoveryCard state={state} onOpenSettings={onOpenSettings} />
+            </div>
+          )}
+        </div>
+      );
+    };
+
     const App = () => {
       const [state, setState] = useState(() => loadState());
-      const [view, setView] = useState('home');
+      const [view, setView] = useState('today');
+      const [progressTab, setProgressTab] = useState(null);
+      const [cardioForm, setCardioForm] = useState(null); // entry being logged/edited, or null
       const [activeDayId, setActiveDayId] = useState(state.activeSession?.dayId || null);
       const [syncStatus, setSyncStatus] = useState(cloudSync.getSecret() ? 'syncing' : 'off');
 
@@ -5882,8 +6303,31 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
             .catch(() => {});
         }
       };
-      const handleCancel = () => setView('log');
-      const handleSummaryDone = () => { setCompletionSummary(null); setView('log'); };
+      const handleCancel = () => setView('today');
+      const handleSummaryDone = () => { setCompletionSummary(null); setView('today'); };
+
+      // Runs + Pilates: one sheet shared by every screen.
+      const openCardio = (slotId, existing) => {
+        if (existing) { setCardioForm(existing); return; }
+        const sl = CARDIO_SLOTS[slotId];
+        const rx = prescribeCardio(slotId, state);
+        setCardioForm({ type: sl.type, slot: slotId, kind: sl.kind, focus: sl.focus,
+          distanceMi: rx && rx.distanceMi ? rx.distanceMi : null,
+          durationMin: sl.type === 'pilates' ? 50 : null });
+      };
+      const saveCardio = (entry) => {
+        setState((prev) => {
+          const list = (prev.cardioLog || []).filter((c) => c.id !== entry.id);
+          const next = [entry, ...list].sort((a, b) => (a.date === b.date ? (a.loggedAt < b.loggedAt ? 1 : -1) : (a.date < b.date ? 1 : -1)));
+          return { ...prev, cardioLog: next.slice(0, 1000) };
+        });
+        setCardioForm(null);
+      };
+      const deleteCardio = (id) => {
+        setState((prev) => ({ ...prev, cardioLog: (prev.cardioLog || []).filter((c) => c.id !== id) }));
+        setCardioForm(null);
+      };
+      const go = (v, sub) => { if (v === 'progress') setProgressTab(sub || null); setView(v); window.scrollTo(0, 0); };
 
       // Called from Settings after the secret changes or a manual pull is requested.
       const handleResync = async () => {
@@ -5920,19 +6364,21 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
         }
       };
 
-      const tabBarVisible = view === 'home' || view === 'log' || view === 'diet' || view === 'coach';
+      const tabBarVisible = ['today', 'plan', 'progress', 'diet', 'coach'].includes(view);
 
       return (
         <div className="min-h-screen bg-black text-neutral-100">
-          {view === 'home' && <HomeView state={state} syncStatus={syncStatus} onSettings={() => setView('settings')} onDiet={() => setView('diet')} onBodyScan={() => setView('body-scan')} onCoach={() => setView('coach')} />}
-          {view === 'body-scan' && <BodyScanView state={state} onBack={() => setView('home')} onUpdateState={setState} />}
-          {view === 'log' && <IronLogView state={state} onStart={handleStart} onSettings={() => setView('settings')} onUpdateState={setState} />}
-          {view === 'diet' && <DietView state={state} onBack={() => setView('home')} onUpdateState={setState} />}
+          {view === 'today' && <TodayView state={state} syncStatus={syncStatus} onSettings={() => setView('settings')} onStartLift={handleStart} onOpenCardio={openCardio} onCoach={() => go('coach')} onGo={go} />}
+          {view === 'plan' && <PlanView state={state} onStartLift={handleStart} onOpenCardio={openCardio} onLogExtra={() => setCardioForm({ type: 'run' })} />}
+          {view === 'progress' && <ProgressView state={state} initialTab={progressTab} onOpenSettings={() => setView('settings')} onOpenBodyScan={() => setView('body-scan')} onOpenDiet={() => go('diet')} onEditCardio={setCardioForm} onUpdateState={setState} />}
+          {view === 'body-scan' && <BodyScanView state={state} onBack={() => go('progress', 'body')} onUpdateState={setState} />}
+          {view === 'diet' && <DietView state={state} onBack={() => go('today')} onUpdateState={setState} />}
           {view === 'coach' && <CoachView state={state} onUpdateState={setState} />}
           {view === 'session' && activeDayId && <SessionView state={state} dayId={activeDayId} onComplete={handleComplete} onCancel={handleCancel} onUpdateState={setState} />}
           {view === 'complete' && completionSummary && <SessionCompleteView summary={completionSummary} onDone={handleSummaryDone} />}
-          {view === 'settings' && <SettingsView state={state} syncStatus={syncStatus} onBack={() => setView('home')} onUpdateState={setState} onResync={handleResync} />}
-          {tabBarVisible && <TabBar current={view} onChange={setView} />}
+          {view === 'settings' && <SettingsView state={state} syncStatus={syncStatus} onBack={() => go('today')} onUpdateState={setState} onResync={handleResync} />}
+          {tabBarVisible && <TabBar current={view} onChange={(v) => go(v)} />}
+          <CardioLogForm open={!!cardioForm} initial={cardioForm} onCancel={() => setCardioForm(null)} onSave={saveCardio} onDelete={deleteCardio} />
         </div>
       );
     };
@@ -5942,23 +6388,24 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
     // ============================================================
     const TabBar = ({ current, onChange }) => {
       const tabs = [
-        { id: 'home',  label: 'Home',     icon: Home },
-        { id: 'log',   label: 'Iron Log', icon: Dumbbell },
-        { id: 'diet',  label: 'Diet',     icon: Utensils },
-        { id: 'coach', label: 'Coach',    icon: Sparkle },
+        { id: 'today',    label: 'Today',    icon: Home },
+        { id: 'plan',     label: 'Plan',     icon: Calendar },
+        { id: 'progress', label: 'Progress', icon: TrendingUp },
+        { id: 'diet',     label: 'Fuel',     icon: Utensils },
+        { id: 'coach',    label: 'Coach',    icon: Sparkle },
       ];
       return (
         <div className="fixed bottom-0 left-0 right-0 bg-black/95 backdrop-blur border-t border-neutral-800 z-30"
              style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
-          <div className="max-w-2xl mx-auto grid grid-cols-4">
+          <div className="max-w-2xl mx-auto grid grid-cols-5">
             {tabs.map(t => {
               const Ic = t.icon;
               const active = current === t.id;
               return (
                 <button key={t.id} onClick={() => onChange(t.id)}
-                  className={`flex flex-col items-center justify-center py-2.5 gap-1 ${active ? 'text-orange-400' : 'text-neutral-500 hover:text-neutral-200'}`}>
-                  <Ic size={20} strokeWidth={active ? 2.5 : 2} />
-                  <div className={`text-[10px] uppercase tracking-wider font-mono ${active ? 'font-bold' : ''}`}>{t.label}</div>
+                  className={`flex flex-col items-center justify-center pt-2.5 pb-2 gap-1 ${active ? 'text-neutral-50' : 'text-neutral-500'}`}>
+                  <Ic size={21} strokeWidth={active ? 2.4 : 1.8} />
+                  <div className={`text-[10px] font-medium tracking-wide ${active ? '' : ''}`}>{t.label}</div>
                 </button>
               );
             })}
