@@ -72,6 +72,7 @@ Tabs: **Today** (next sessions in the sequence + done today + week meters) · **
 - Three disciplines, one colour each, via `DISC`: Strength orange, Run sky, Pilates violet. Every training surface uses it so the blocks never blur together.
 - Keep screens calm: one primary action per card, details behind a "Details" toggle or a sheet. Don't add data dumps to Today.
 - Run/Pilates logging is one shared `CardioLogForm` sheet owned by `App`.
+- Strength percentiles: shown big and colour-coded by band (`PCT_BANDS`: Beginner/Novice/Intermediate/Advanced/Elite) with a `PercentileBar` marker, on the overall card (plus a 4-lift strip) and each lift card.
 - Running insight: predicted half via Riegel (T2 = T1 × (13.1/D1)^1.06) from the best 3+ mi run in 8 weeks; pace trends use completed weeks only.
 
 ## Data shape

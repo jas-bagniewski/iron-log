@@ -5940,6 +5940,49 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
       return best;
     };
 
+    // Percentile bands (same cut-offs as percentileLabel), one colour each.
+    const PCT_BANDS = [
+      { label: 'Beginner',     from: 0,  to: 25,  hex: '#525252', text: 'text-neutral-400' },
+      { label: 'Novice',       from: 25, to: 50,  hex: '#a3a3a3', text: 'text-neutral-200' },
+      { label: 'Intermediate', from: 50, to: 75,  hex: '#fb923c', text: 'text-orange-300' },
+      { label: 'Advanced',     from: 75, to: 95,  hex: '#4ade80', text: 'text-green-400' },
+      { label: 'Elite',        from: 95, to: 100, hex: '#facc15', text: 'text-yellow-300' },
+    ];
+    const bandOf = (p) => PCT_BANDS.find((b) => p < b.to) || PCT_BANDS[PCT_BANDS.length - 1];
+    const liftPercentile = (lift, state) => {
+      const bs = state.bodyStats || {};
+      const val = getBestE1RM(state.history, lift) || (state.trainingMaxes || {})[lift];
+      const std = adjustedStandards(lift, bs.weight, bs.age);
+      return std && val ? computePercentile(val, std) : null;
+    };
+    // Banded track with a marker where you sit. Segment widths are true to the
+    // 0-100 scale, so the marker position reads directly as the percentile.
+    const PercentileBar = ({ pct, showLabels = true }) => (
+      <div>
+        <div className="relative h-2.5">
+          <div className="absolute inset-0 flex gap-[2px] rounded-full overflow-hidden">
+            {PCT_BANDS.map((b) => (
+              <div key={b.label} style={{ width: `${b.to - b.from}%`, background: b.hex, opacity: pct != null && pct >= b.from ? 0.9 : 0.22 }} />
+            ))}
+          </div>
+          {pct != null && (
+            <div className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-4 h-4 rounded-full bg-white border-[3px] border-black shadow"
+                 style={{ left: `${Math.min(98, Math.max(2, pct))}%` }} />
+          )}
+        </div>
+        {showLabels && (
+          <div className="flex mt-1.5 text-[10px] text-neutral-500">
+            {PCT_BANDS.map((b) => (
+              <div key={b.label} style={{ width: `${b.to - b.from}%` }}
+                   className={`truncate ${pct != null && bandOf(pct).label === b.label ? `${b.text} font-semibold` : ''}`}>
+                {b.label === 'Elite' ? '' : b.label}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+
     const LiftRow = ({ lift, label, state }) => {
       const bs = state.bodyStats || {};
       const series = e1rmSeries(state.history, lift);
@@ -5953,22 +5996,29 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
       const change = series.length >= 2 ? last.value - first.value : null;
       return (
         <Card className="p-4 mb-2">
-          <div className="flex items-start justify-between gap-3 mb-3">
-            <div>
+          <div className="flex items-start justify-between gap-3 mb-4">
+            <div className="min-w-0">
               <div className="text-[15px] font-semibold text-neutral-100">{label}</div>
-              <div className="text-[12px] text-neutral-500 mt-0.5">Training max {tm} lb{pct != null ? ` · ${pct}${ordSuffix(pct)} percentile` : ''}</div>
+              {pct != null ? (
+                <div className="flex items-baseline gap-2 mt-1.5">
+                  <div className={`font-mono text-[34px] font-bold leading-none ${bandOf(pct).text}`}>{pct}<span className="text-[16px]">{ordSuffix(pct)}</span></div>
+                  <div className={`text-[12px] font-semibold uppercase tracking-wider ${bandOf(pct).text}`}>{bandOf(pct).label}</div>
+                </div>
+              ) : <div className="text-[12px] text-neutral-500 mt-1">Set body stats to see your percentile</div>}
             </div>
-            <div className="text-right">
+            <div className="text-right shrink-0">
               <div className="font-mono text-2xl font-bold text-neutral-50 leading-none">{best || '—'}</div>
               <div className="text-[11px] text-neutral-500 mt-1">est. 1RM</div>
+              <div className="text-[11px] text-neutral-600 mt-0.5">TM {tm}</div>
             </div>
           </div>
+          {pct != null && <div className="mb-4"><PercentileBar pct={pct} /></div>}
           {series.length >= 2 ? <Sparkline points={series} color={DISC.strength.hex} height={40} /> : <div className="h-10 flex items-center text-[12px] text-neutral-600">Trend appears after two top sets</div>}
           <div className="flex items-center justify-between mt-2 text-[12px]">
             <span className={change > 0 ? 'text-green-400' : change < 0 ? 'text-red-400' : 'text-neutral-500'}>
               {change != null ? `${change > 0 ? '+' : ''}${change} lb since ${new Date(first.ts).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}` : ''}
             </span>
-            {next && <span className="text-neutral-500">Next: {next.value} lb → {next.pct}{ordSuffix(next.pct)}</span>}
+            {next && <span className="text-neutral-400">{next.value} lb → <span className="font-semibold">{next.label}</span></span>}
           </div>
         </Card>
       );
@@ -5997,12 +6047,24 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
       return (
         <>
           <Card className="p-5 mb-3">
-            <div className="text-[12px] text-neutral-500 mb-2">Overall strength</div>
-            <div className="flex items-baseline gap-2">
-              <div className="font-mono text-5xl font-bold text-neutral-50 leading-none">{overall ?? '—'}<span className="text-xl">{overall != null ? ordSuffix(overall) : ''}</span></div>
-              <div className="text-[13px] font-semibold text-orange-300 uppercase tracking-wider">{overall != null ? percentileLabel(overall) : ''}</div>
+            <div className="text-[12px] text-neutral-500 mb-2">Overall strength percentile</div>
+            <div className="flex items-baseline gap-2 mb-4">
+              <div className={`font-mono text-5xl font-bold leading-none ${overall != null ? bandOf(overall).text : 'text-neutral-50'}`}>{overall ?? '—'}<span className="text-xl">{overall != null ? ordSuffix(overall) : ''}</span></div>
+              <div className={`text-[13px] font-semibold uppercase tracking-wider ${overall != null ? bandOf(overall).text : ''}`}>{overall != null ? bandOf(overall).label : ''}</div>
             </div>
-            <div className="text-[13px] text-neutral-500 mt-2">Percentile vs men aged {(state.bodyStats || {}).age || 45} at {(state.bodyStats || {}).weight || 185} lb, averaged over your four lifts.</div>
+            {overall != null && <PercentileBar pct={overall} />}
+            <div className="grid grid-cols-4 gap-2 mt-5">
+              {lifts.map(([l]) => {
+                const p = liftPercentile(l, state);
+                return (
+                  <div key={l} className="bg-neutral-900/70 border border-neutral-800/70 rounded-xl py-2.5 text-center">
+                    <div className="text-[11px] text-neutral-500 mb-0.5">{{ bench: 'Bench', squat: 'Squat', deadlift: 'Deadlift', press: 'Press' }[l]}</div>
+                    <div className={`font-mono text-xl font-bold leading-none ${p != null ? bandOf(p).text : 'text-neutral-500'}`}>{p ?? '—'}<span className="text-[11px]">{p != null ? ordSuffix(p) : ''}</span></div>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="text-[12px] text-neutral-500 mt-4 leading-relaxed">Compared with men aged {(state.bodyStats || {}).age || 45} at {(state.bodyStats || {}).weight || 185} lb bodyweight, from your best estimated 1RM. 50th = average lifter, 75th = advanced.</div>
           </Card>
           {(top || stalled.length > 0) && (
             <Insight d="strength">
