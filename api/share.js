@@ -35,37 +35,65 @@ const WEEK_SCHEMES = {
 };
 
 const ACCESSORIES = {
+  // Bench day
   'incline-db':       { name: 'Incline Dumbbell Press', sets: 3, repsLow: 8,  repsHigh: 10, inc: 5,  startWeight: 50 },
-  'close-grip':       { name: 'Close-Grip Bench Press', sets: 3, repsLow: 6,  repsHigh: 8,  inc: 5,  startWeight: 135 },
+  'tonal-row-1arm':   { name: 'Single-Arm Row (Tonal)', sets: 3, repsLow: 10, repsHigh: 12, inc: 5,  startWeight: 40 },
   'tricep-ext-tonal': { name: 'Tricep Extension (Tonal)', sets: 3, repsLow: 10, repsHigh: 12, inc: 5,  startWeight: 50 },
-  'decline-fly-tonal':{ name: 'Decline Chest Fly (Tonal)', sets: 3, repsLow: 8,  repsHigh: 10, inc: 5,  startWeight: 40 },
-  'goblet-squat':     { name: 'Goblet Squat',           sets: 3, repsLow: 8,  repsHigh: 10, inc: 5,  startWeight: 50 },
-  'lat-pulldown':     { name: 'Lat Pulldown',           sets: 3, repsLow: 8,  repsHigh: 10, inc: 5,  startWeight: 120 },
-  'plank':            { name: 'Plank',                  sets: 3, repsLow: 30, repsHigh: 60, inc: 0,  startWeight: 0, isTimed: true },
+  // Squat day — knee-friendly glute + depth work (no split squats: knee history)
+  'hip-thrust':       { name: 'Barbell Hip Thrust',     sets: 3, repsLow: 8,  repsHigh: 12, inc: 10, startWeight: 135 },
+  'goblet-squat':     { name: 'Goblet Squat (3s pause)', sets: 3, repsLow: 8, repsHigh: 10, inc: 5,  startWeight: 50 },
+  'sl-calf-raise':    { name: 'Single-Leg DB Calf Raise', sets: 3, repsLow: 12, repsHigh: 15, inc: 5, startWeight: 35 },
+  // Deadlift day
   'romanian-dl':      { name: 'Romanian Deadlift',      sets: 3, repsLow: 8,  repsHigh: 10, inc: 10, startWeight: 135 },
-  'leg-press':        { name: 'Leg Press',              sets: 3, repsLow: 10, repsHigh: 12, inc: 10, startWeight: 200 },
-  'leg-curls':        { name: 'Lying Leg Curls',        sets: 3, repsLow: 10, repsHigh: 12, inc: 5,  startWeight: 80 },
-  'calf-raises':      { name: 'Standing Calf Raises',   sets: 3, repsLow: 12, repsHigh: 15, inc: 10, startWeight: 100 },
-  'leg-raises':       { name: 'Hanging Leg Raises',     sets: 3, repsLow: 10, repsHigh: 15, inc: 0,  startWeight: 0, isBodyweight: true },
-  'pull-ups':         { name: 'Pull-Ups',               sets: 3, repsLow: 5,  repsHigh: 10, inc: 0,  startWeight: 0, isBodyweight: true },
+  'pull-ups':         { name: 'Pull-Ups',               sets: 4, repsLow: 5,  repsHigh: 10, inc: 0,  startWeight: 0, isBodyweight: true },
+  'pallof-tonal':     { name: 'Pallof Press (Tonal, per side)', sets: 3, repsLow: 10, repsHigh: 12, inc: 5, startWeight: 30 },
+  // Press day
   'barbell-rows':     { name: 'Barbell Rows',           sets: 3, repsLow: 8,  repsHigh: 10, inc: 5,  startWeight: 135 },
-  'lat-pulldown-back':{ name: 'Lat Pulldown',           sets: 3, repsLow: 10, repsHigh: 12, inc: 5,  startWeight: 120 },
-  'face-pulls':       { name: 'Face Pulls',             sets: 3, repsLow: 12, repsHigh: 15, inc: 5,  startWeight: 40 },
-  'bicep-curls':      { name: 'Dumbbell Bicep Curls',   sets: 3, repsLow: 10, repsHigh: 12, inc: 5,  startWeight: 25 },
+  'face-pulls':       { name: 'Face Pulls (Tonal)',     sets: 3, repsLow: 12, repsHigh: 15, inc: 5,  startWeight: 40 },
+  'lateral-raise-tonal': { name: 'Lateral Raise (Tonal)', sets: 3, repsLow: 12, repsHigh: 15, inc: 5, startWeight: 15 },
+  // Retired from the v3 program. Kept so old history renders and the
+  // progress charts keep their names.
+  'close-grip':       { name: 'Close-Grip Bench Press', sets: 3, repsLow: 6,  repsHigh: 8,  inc: 5,  startWeight: 135, retired: true },
+  'decline-fly-tonal':{ name: 'Decline Chest Fly (Tonal)', sets: 3, repsLow: 8,  repsHigh: 10, inc: 5,  startWeight: 40, retired: true },
+  'lat-pulldown':     { name: 'Lat Pulldown',           sets: 3, repsLow: 8,  repsHigh: 10, inc: 5,  startWeight: 120, retired: true },
+  'plank':            { name: 'Plank',                  sets: 3, repsLow: 30, repsHigh: 60, inc: 0,  startWeight: 0, isTimed: true, retired: true },
+  'leg-press':        { name: 'Leg Press',              sets: 3, repsLow: 10, repsHigh: 12, inc: 10, startWeight: 200, retired: true },
+  'leg-curls':        { name: 'Lying Leg Curls',        sets: 3, repsLow: 10, repsHigh: 12, inc: 5,  startWeight: 80, retired: true },
+  'calf-raises':      { name: 'Standing Calf Raises',   sets: 3, repsLow: 12, repsHigh: 15, inc: 10, startWeight: 100, retired: true },
+  'leg-raises':       { name: 'Hanging Leg Raises',     sets: 3, repsLow: 10, repsHigh: 15, inc: 0,  startWeight: 0, isBodyweight: true, retired: true },
+  'lat-pulldown-back':{ name: 'Lat Pulldown',           sets: 3, repsLow: 10, repsHigh: 12, inc: 5,  startWeight: 120, retired: true },
+  'bicep-curls':      { name: 'Dumbbell Bicep Curls',   sets: 3, repsLow: 10, repsHigh: 12, inc: 5,  startWeight: 25, retired: true },
 };
 
+// supplementary.type:
+//   'fsl' — First Set Last: N x reps at the week's first-set % of the
+//           day's own TM. Skipped on deload week.
+//   'bbb' (default) — fixed-% volume block on another lift's TM.
 const DAY_TEMPLATES = {
-  chest:    { id: 'chest',    name: 'Chest Day',     mainLift: 'bench',    mainName: 'Bench Press',          isVolume: false, accessories: ['incline-db', 'close-grip', 'tricep-ext-tonal', 'decline-fly-tonal'] },
-  fullbody: {
-    id: 'fullbody', name: 'Full Body Day',
-    mainLift: 'press', mainName: 'Military Press', isVolume: false,
-    supplementary: { lift: 'bench', name: 'Bench Press (BBB)', pct: 0.60, deloadPct: 0.50, sets: 5, deloadSets: 3, reps: 10, deloadReps: 5 },
-    accessories: ['goblet-squat', 'lat-pulldown', 'plank'],
+  chest: {
+    id: 'chest', name: 'Bench Day', mainLift: 'bench', mainName: 'Bench Press', isVolume: false,
+    supplementary: { type: 'fsl', lift: 'bench', name: 'Bench Press (FSL 5×5)', sets: 5, reps: 5 },
+    accessories: ['incline-db', 'tonal-row-1arm', 'tricep-ext-tonal'],
   },
-  legs:     { id: 'legs',     name: 'Leg Day',       mainLift: 'squat',    mainName: 'Back Squat',           isVolume: false, accessories: ['romanian-dl', 'leg-press', 'leg-curls', 'calf-raises', 'leg-raises'] },
-  back:     { id: 'back',     name: 'Back Day',      mainLift: 'deadlift', mainName: 'Deadlift',             isVolume: false, accessories: ['pull-ups', 'barbell-rows', 'lat-pulldown-back', 'face-pulls', 'bicep-curls'] },
+  legs: {
+    id: 'legs', name: 'Squat Day', mainLift: 'squat', mainName: 'Back Squat', isVolume: false,
+    supplementary: { type: 'fsl', lift: 'squat', name: 'Back Squat (FSL 5×5)', sets: 5, reps: 5 },
+    accessories: ['hip-thrust', 'goblet-squat', 'sl-calf-raise'],
+  },
+  back: {
+    id: 'back', name: 'Deadlift Day', mainLift: 'deadlift', mainName: 'Hex Bar Deadlift', isVolume: false,
+    supplementary: { type: 'fsl', lift: 'deadlift', name: 'Hex Bar Deadlift (FSL 3×5)', sets: 3, reps: 5 },
+    accessories: ['romanian-dl', 'pull-ups', 'pallof-tonal'],
+  },
+  // Press day keeps the bench BBB block: bench gets a second exposure.
+  fullbody: {
+    id: 'fullbody', name: 'Press Day', mainLift: 'press', mainName: 'Military Press', isVolume: false,
+    supplementary: { type: 'bbb', lift: 'bench', name: 'Bench Press (BBB)', pct: 0.60, deloadPct: 0.50, sets: 5, deloadSets: 3, reps: 10, deloadReps: 5 },
+    accessories: ['barbell-rows', 'face-pulls', 'lateral-raise-tonal'],
+  },
 };
-const DAY_ORDER = ['chest', 'fullbody', 'legs', 'back'];
+// Weekly order: Mon bench, Tue squat, Thu deadlift, Fri press.
+const DAY_ORDER = ['chest', 'legs', 'back', 'fullbody'];
 
 const ACTIVITY_MULTIPLIERS = { sedentary: 1.2, light: 1.375, moderate: 1.55, active: 1.725, very_active: 1.9 };
 const DEFAULT_BODY_STATS = {
@@ -187,7 +215,17 @@ function buildSessionPreview(dayId, state) {
 
   // Supplementary block (e.g., BBB bench on Full Body day). Submaximal volume work.
   let supplementary = null;
-  if (tpl.supplementary) {
+  if (tpl.supplementary && tpl.supplementary.type === 'fsl') {
+    const sup = tpl.supplementary;
+    const supTm = state.trainingMaxes && state.trainingMaxes[sup.lift];
+    if (state.week !== 4 && supTm != null && WEEK_SCHEMES[state.week]) {
+      const w = round5(supTm * WEEK_SCHEMES[state.week].sets[0].pct);
+      supplementary = {
+        lift: sup.lift, name: sup.name,
+        sets: Array.from({ length: sup.sets }, () => ({ weight: w, targetReps: sup.reps, isAmrap: false })),
+      };
+    }
+  } else if (tpl.supplementary) {
     const sup = tpl.supplementary;
     const isDeload = state.week === 4;
     const pct = isDeload ? (sup.deloadPct != null ? sup.deloadPct : sup.pct) : sup.pct;
@@ -270,6 +308,11 @@ function publicView(s) {
     history: Array.isArray(s.history) ? s.history.slice(0, 50) : [],
     upcoming,
     doneThisWeek,
+    // Runs + Pilates (program v4), newest first.
+    cardio: Array.isArray(s.cardioLog) ? s.cardioLog.slice(0, 30).map((c) => ({
+      date: c.date, type: c.type, slot: c.slot || null, distanceMi: c.distanceMi, durationMin: c.durationMin,
+      where: c.where || null, rpe: c.rpe || null, className: c.className || null, focus: c.focus || null, notes: c.notes || '',
+    })) : [],
     bodyStats: s.bodyStats ? {
       weight: s.bodyStats.weight,
       bodyFatPct: s.bodyStats.bodyFatPct,
