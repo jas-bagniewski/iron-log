@@ -233,14 +233,19 @@
                        search: 'Reformer classes tagged stretch, mobility, hamstrings or hips' },
       'long-sat':    { id: 'long-sat',    type: 'run',     kind: 'long',    label: 'Long Run' },
     };
+    // A training week is a CHECKLIST, not a calendar: 4 lifts, 3 runs (+1
+    // optional), 2 Pilates, done in any order over however many days it
+    // takes. WEEK_PLAN is only the suggested order (heavy legs and hard runs
+    // kept apart). The week rolls over when the 4th lift is finished, or when
+    // the owner skips ahead from Plan. Slot ids still carry the old weekday
+    // names (easy-mon etc.) because logged entries reference them.
     const WEEK_PLAN = [
-      { day: 'Mon', items: [{ lift: 'chest' }, { slot: 'easy-mon' }] },
-      { day: 'Tue', items: [{ lift: 'legs' }, { slot: 'pilates-tue' }] },
-      { day: 'Wed', items: [{ slot: 'quality-wed' }] },
-      { day: 'Thu', items: [{ lift: 'back' }, { slot: 'easy-thu' }] },
-      { day: 'Fri', items: [{ lift: 'fullbody' }, { slot: 'pilates-fri' }] },
-      { day: 'Sat', items: [{ slot: 'long-sat' }] },
-      { day: 'Sun', items: [] },
+      { day: 'Day 1', items: [{ lift: 'chest' }, { slot: 'easy-mon' }] },
+      { day: 'Day 2', items: [{ lift: 'legs' }, { slot: 'pilates-tue' }] },
+      { day: 'Day 3', items: [{ slot: 'quality-wed' }] },
+      { day: 'Day 4', items: [{ lift: 'back' }, { slot: 'easy-thu' }] },
+      { day: 'Day 5', items: [{ lift: 'fullbody' }, { slot: 'pilates-fri' }] },
+      { day: 'Day 6', items: [{ slot: 'long-sat' }] },
     ];
     const LONG_RUN_CAP = 13;
     const LONG_RUN_DEFAULT = 11;
@@ -276,17 +281,24 @@
       x.setDate(x.getDate() - ((x.getDay() + 6) % 7)); // back to Monday
       return dateKey(x);
     };
+    // When the current training week began (ISO timestamp). Older state has
+    // no weekStartedAt: fall back to this calendar Monday (App backfills it).
+    const mondayIso = () => parseDateKey(weekStartKey()).toISOString();
+    const weekStartIso = (state) => state.weekStartedAt || mondayIso();
+    // An entry belongs to the training week it was logged in (stamped `tw`),
+    // never to a calendar week. Entries from before stamping use loggedAt.
+    const inCurrentWeek = (c, ws) => c.tw ? c.tw === ws : (c.loggedAt || `${c.date}T12:00:00`) >= ws;
     const cardioThisWeek = (state) => {
-      const start = weekStartKey();
-      return (state.cardioLog || []).filter((c) => c.date >= start);
+      const ws = weekStartIso(state);
+      return (state.cardioLog || []).filter((c) => inCurrentWeek(c, ws));
     };
 
-    // Long-run target: last week's long run + 1 mi, capped at 13. Cutback to
+    // Long-run target: the previous training week's long run + 1 mi, capped at 13. Cutback to
     // ~75% on the lifting deload week.
     const lastLongRun = (state) => {
-      const start = weekStartKey();
+      const ws = weekStartIso(state);
       const prior = (state.cardioLog || [])
-        .filter((c) => c.type === 'run' && c.date < start && (c.slot === 'long-sat' || c.kind === 'long') && c.distanceMi > 0)
+        .filter((c) => c.type === 'run' && !inCurrentWeek(c, ws) && (c.slot === 'long-sat' || c.kind === 'long') && c.distanceMi > 0)
         .sort((a, b) => (a.date < b.date ? 1 : -1));
       return prior[0] || null;
     };
@@ -303,7 +315,7 @@
       if (slot.kind === 'easy') {
         const mi = cutback ? 3 : (slot.optional ? 3 : 4);
         return {
-          title: `${mi} mi easy`,
+          title: 'Easy, conversational',
           target: `${mi} mi`, distanceMi: mi,
           detail: `Conversational — you could talk in full sentences. ${paceLabel(10.75)} or slower. ${slot.optional ? 'Only if your legs feel good after deadlifts.' : 'Tread or road.'}`,
         };
@@ -315,7 +327,7 @@
         if (cutback) mi = Math.max(6, Math.round(base * 0.75));
         const atCap = !cutback && last && last.distanceMi >= LONG_RUN_CAP;
         return {
-          title: `${mi} mi long run${cutback ? ' (cutback)' : ''}`,
+          title: cutback ? 'Cutback week, easy' : atCap ? 'Last 2 mi at 8:30' : 'Easy, steady',
           target: `${mi} mi`, distanceMi: mi,
           detail: atCap
             ? `Distance is built. Run the first ${mi - 2} mi easy, then the last 2 mi at ${paceLabel(8.5)}.`
@@ -447,8 +459,27 @@
       const completedEntry = { ...completed, completedAt: new Date().toISOString() };
       const allEntries = [completedEntry, ...(state.history || [])];
 
+      let weekStartedAt = state.weekStartedAt;
       if (Object.values(done).every(v => v)) {
-        newDone = { chest: false, fullbody: false, legs: false, back: false };
+        const r = rollTrainingWeek(state, allEntries);
+        ({ cycle, week, trainingMaxes, cycleAdvanced, tmDecisions } = r);
+        newDone = r.completedThisWeek;
+        weekStartedAt = r.weekStartedAt;
+        if (tmDecisions) completedEntry.tmDecisions = tmDecisions;
+      }
+      const newHistory = allEntries.slice(0, 200);
+      const tmHistory = appendTMHistory(state.trainingMaxesHistory, trainingMaxes, cycleAdvanced ? 'cycle-end' : 'unchanged');
+      return { ...state, cycle, week, trainingMaxes, weekStartedAt, accessoryLog: newLog, completedThisWeek: newDone, history: newHistory, activeSession: null, trainingMaxesHistory: tmHistory, _lastTMDecisions: tmDecisions };
+    };
+
+    // Move to the next training week. Week 4 -> next cycle with the per-lift
+    // TM decisions. Used when the 4th lift is finished AND when the owner
+    // skips ahead (travel, illness): a skipped PR-week lift has no AMRAP, so
+    // its TM holds — same rule as always.
+    const rollTrainingWeek = (state, allEntries) => {
+      let { cycle, week, trainingMaxes } = state;
+      let cycleAdvanced = false, tmDecisions = null;
+      {
         if (week === 4) {
           week = 1; cycle += 1; cycleAdvanced = true;
           // Conditional per-lift TM progression, judged on this cycle's
@@ -485,12 +516,25 @@
             tmDecisions[lift] = { action, from, to };
           });
           trainingMaxes = nextTMs;
-          completedEntry.tmDecisions = tmDecisions;
         } else week += 1;
       }
-      const newHistory = allEntries.slice(0, 200);
-      const tmHistory = appendTMHistory(state.trainingMaxesHistory, trainingMaxes, cycleAdvanced ? 'cycle-end' : 'unchanged');
-      return { ...state, cycle, week, trainingMaxes, accessoryLog: newLog, completedThisWeek: newDone, history: newHistory, activeSession: null, trainingMaxesHistory: tmHistory, _lastTMDecisions: tmDecisions };
+      return {
+        cycle, week, trainingMaxes, cycleAdvanced, tmDecisions,
+        completedThisWeek: { chest: false, fullbody: false, legs: false, back: false },
+        weekStartedAt: new Date().toISOString(),
+      };
+    };
+    const skipToNextWeek = (state) => {
+      const r = rollTrainingWeek(state, state.history || []);
+      return {
+        ...state,
+        cycle: r.cycle, week: r.week, trainingMaxes: r.trainingMaxes,
+        completedThisWeek: r.completedThisWeek, weekStartedAt: r.weekStartedAt,
+        activeSession: null,
+        trainingMaxesHistory: appendTMHistory(state.trainingMaxesHistory, r.trainingMaxes, r.cycleAdvanced ? 'cycle-end' : 'unchanged'),
+        _lastTMDecisions: r.tmDecisions,
+        skippedWeeks: [{ at: r.weekStartedAt, cycle: state.cycle, week: state.week, missed: DAY_ORDER.filter((d) => !(state.completedThisWeek || {})[d]) }, ...(state.skippedWeeks || [])].slice(0, 50),
+      };
     };
 
     const estimate1RM = (w, r) => (!w || !r) ? null : Math.round(w * (1 + r / 30));
@@ -784,6 +828,7 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
       cycle: 1, week: 1,
       completedThisWeek: { chest: false, fullbody: false, legs: false, back: false },
       accessoryLog: {}, history: [], activeSession: null,
+      weekStartedAt: null, // ISO: when the current training week began (weeks are checklists, not calendar weeks)
       cardioLog: [], // runs + Pilates: [{ id, date, type: 'run'|'pilates', slot, distanceMi, durationMin, where, rpe, className, focus, notes, loggedAt }]
       shareToken: null,
       bodyStats: defaultBodyStats,
@@ -5190,7 +5235,6 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
     };
     const DAY_NAMES_LONG = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
     const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-    const todayPlanIdx = () => (new Date().getDay() + 6) % 7;
     const fmtHMS = (min) => fmtDuration(min);
 
     // Small shared primitives.
@@ -5325,7 +5369,7 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
     // ============================================================
     // TRAINING BLOCK CARD (Today) — one card per discipline
     // ============================================================
-    const BlockCard = ({ it, state, onStartLift, onOpenCardio }) => {
+    const BlockCard = ({ it, state, onStartLift, onOpenCardio, note }) => {
       const D = DISC[it.d];
       const [showHow, setShowHow] = useState(false);
       const action = () => it.kind === 'lift' ? onStartLift(it.id) : onOpenCardio(it.id, it.entry);
@@ -5360,6 +5404,7 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
               {!it.done && it.inProgress && <div className="text-[12px] font-medium text-orange-300">In progress</div>}
             </div>
             <div className={`text-[22px] font-semibold tracking-tight leading-tight ${it.done ? 'text-neutral-400' : 'text-neutral-50'}`}>{it.d === 'pilates' ? it.slot.focus : it.title}</div>
+            {note && !it.done && <div className="text-[13px] text-amber-300/90 mt-1.5">{note}</div>}
             {it.done ? (
               <div className="text-[14px] text-neutral-400 mt-1 font-mono">{itemResult(it)}</div>
             ) : (
@@ -5399,29 +5444,54 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
     };
 
     // ============================================================
-    // TODAY
+    // TODAY — the next sessions in the sequence, not a weekday's slot
     // ============================================================
+    // Next group = the first suggested day (in order) that still has a
+    // required session left. Missing a day never breaks anything: the next
+    // session just waits.
+    const nextGroups = (state) => {
+      const out = [];
+      WEEK_PLAN.forEach((day, idx) => {
+        const items = resolvePlanDay(idx, state);
+        const pending = items.filter((x) => !x.done && !x.optional);
+        if (pending.length) out.push({ idx, items: items.filter((x) => !x.done) });
+      });
+      return out;
+    };
+    const liftedToday = (state) => (state.history || []).some((h) => h.completedAt && dateKey(new Date(h.completedAt)) === todayKey());
+    const doneTodayItems = (state) => {
+      const today = todayKey();
+      const lifts = (state.history || []).filter((h) => h.completedAt && dateKey(new Date(h.completedAt)) === today)
+        .map((h) => ({ key: `l-${h.completedAt}`, d: 'strength', title: (DAY_TEMPLATES[h.dayId] || {}).name || h.name,
+          result: (() => { const am = (h.mainSets || []).find((x) => x.isAmrap && x.actualReps); return am ? `Top set ${am.weight} × ${am.actualReps}` : 'Done'; })() }));
+      const cardio = (state.cardioLog || []).filter((c) => c.date === today)
+        .map((c) => ({ key: c.id, d: c.type === 'run' ? 'run' : 'pilates', entry: c, title: c.type === 'run' ? cardioEntryTitle(c) : (c.className || c.focus || 'Pilates'),
+          result: c.type === 'run' ? `${c.distanceMi} mi · ${fmtPace(c.durationMin / c.distanceMi)}/mi` : `${Math.round(c.durationMin)} min` }));
+      return [...lifts, ...cardio];
+    };
+    const weekAgeDays = (state) => Math.floor((Date.now() - new Date(weekStartIso(state)).getTime()) / 86_400_000);
+
     const TodayView = ({ state, syncStatus, onSettings, onStartLift, onOpenCardio, onCoach, onGo }) => {
       const now = new Date();
-      const idx = todayPlanIdx();
-      const items = resolvePlanDay(idx, state);
+      const groups = nextGroups(state);
+      const current = groups[0];
+      const after = groups[1];
+      const doneToday = doneTodayItems(state);
+      const lifted = liftedToday(state);
       const totals = weekTotals(state);
-      // A lift from earlier this week that hasn't been done yet — offer it.
-      const behind = WEEK_PLAN.slice(0, idx).flatMap((d) => d.items.filter((x) => x.lift))
-        .map((x) => x.lift).filter((l) => !(state.completedThisWeek || {})[l]);
-      const nextIdx = [1, 2, 3, 4, 5, 6, 7].map((k) => (idx + k) % 7).find((k) => WEEK_PLAN[k].items.length > 0);
-      const nextItems = nextIdx != null ? resolvePlanDay(nextIdx, state) : [];
+      const age = weekAgeDays(state);
       const summary = state.dailyCoachSummary && state.dailyCoachSummary.date === todayKey() ? state.dailyCoachSummary.summary : null;
       const headline = summary && (summary.verdict || summary.headline);
       const o = state.oura && state.oura.last_sync_at && (Date.now() - state.oura.last_sync_at < 36 * 3600_000) ? state.oura : null;
       const targets = computeMacroTargets(state.bodyStats, state.oura, computeWeeklyPace(state), computeBodyDiag(state));
       const eaten = sumMeals((state.mealsByDate || {})[todayKey()] || []).kcal;
       const syncDot = syncStatus === 'synced' ? 'bg-green-400' : syncStatus === 'syncing' ? 'bg-amber-400' : syncStatus === 'off' ? 'bg-neutral-600' : 'bg-red-400';
+      const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
       return (
         <div className="px-5 pb-32 pt-8 max-w-2xl mx-auto">
           <ScreenHeader
-            eyebrow={`${DAY_NAMES_LONG[idx]} · ${MONTHS[now.getMonth()]} ${now.getDate()}`}
+            eyebrow={`${DAYS[now.getDay()]} · ${MONTHS[now.getMonth()]} ${now.getDate()}`}
             title="Today"
             right={
               <button onClick={onSettings} className="relative w-10 h-10 rounded-full border border-neutral-800 flex items-center justify-center text-neutral-400">
@@ -5430,11 +5500,10 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
               </button>
             } />
 
-          {/* This week at a glance */}
           <Card className="p-4 mb-3" onClick={() => onGo('plan')}>
             <div className="flex items-center justify-between mb-4">
-              <div className="text-[13px] font-medium text-neutral-300">This week</div>
-              <div className="text-[12px] text-neutral-500">Cycle {state.cycle} · {WEEK_SCHEMES[state.week].label.toLowerCase()}</div>
+              <div className="text-[13px] font-medium text-neutral-300">Week {state.week} of cycle {state.cycle}</div>
+              <div className="text-[12px] text-neutral-500">{age <= 0 ? 'started today' : `day ${age + 1}`}</div>
             </div>
             <div className="grid grid-cols-3 gap-4">
               <Meter d="strength" label="Strength" value={totals.liftsDone} target={4} />
@@ -5451,42 +5520,56 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
             </Card>
           )}
 
-          <SectionLabel>Today's training</SectionLabel>
-          {items.length === 0 ? (
-            <Card className="p-6 mb-3">
-              <Moon size={22} className="text-neutral-500 mb-3" />
-              <div className="text-[20px] font-semibold text-neutral-100">Recovery day</div>
-              <div className="text-[14px] text-neutral-500 mt-1 leading-relaxed">Walk, stretch, eat well and sleep. This is when the training turns into progress.</div>
-            </Card>
-          ) : items.map((it) => (
-            <BlockCard key={it.id} it={it} state={state} onStartLift={onStartLift} onOpenCardio={onOpenCardio} />
-          ))}
+          {doneToday.length > 0 && (
+            <>
+              <SectionLabel>Done today</SectionLabel>
+              <Card className="divide-y divide-neutral-800/70">
+                {doneToday.map((x) => (
+                  <button key={x.key} onClick={() => x.entry && onOpenCardio(x.entry.slot, x.entry)} className="w-full text-left flex items-center gap-3 px-4 py-3">
+                    <Check size={15} strokeWidth={3} className="text-green-400 shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <div className="text-[14px] text-neutral-200 truncate">{x.title}</div>
+                      <div className={`text-[12px] ${DISC[x.d].text}`}>{DISC[x.d].label}</div>
+                    </div>
+                    <div className="font-mono text-[13px] text-neutral-400">{x.result}</div>
+                  </button>
+                ))}
+              </Card>
+            </>
+          )}
 
-          {behind.length > 0 && (
-            <Card className="p-4 mb-3 flex items-center gap-3" onClick={() => onStartLift(behind[0])}>
-              <div className={`w-9 h-9 rounded-xl ${DISC.strength.soft} flex items-center justify-center shrink-0`}><Dumbbell size={16} className="text-orange-400" /></div>
-              <div className="flex-1 min-w-0">
-                <div className="text-[14px] text-neutral-100 font-medium">Catch up: {DAY_TEMPLATES[behind[0]].name}</div>
-                <div className="text-[12px] text-neutral-500">Missed earlier this week</div>
-              </div>
-              <ArrowRight size={16} className="text-orange-400" />
+          <SectionLabel right={<button onClick={() => onGo('plan')} className="text-[12px] text-neutral-400">Pick another</button>}>
+            {doneToday.length > 0 ? 'Next up' : "Today's training"}
+          </SectionLabel>
+          {current ? current.items.map((it) => (
+            <BlockCard key={it.id} it={it} state={state} onStartLift={onStartLift} onOpenCardio={onOpenCardio}
+              note={it.kind === 'lift' && lifted ? "You've already lifted today. Best saved for tomorrow." : null} />
+          )) : (
+            <Card className="p-6 mb-3">
+              <Check size={22} className="text-green-400 mb-3" strokeWidth={3} />
+              <div className="text-[20px] font-semibold text-neutral-100">Week's runs and Pilates are done</div>
+              <div className="text-[14px] text-neutral-500 mt-1 leading-relaxed">Extra easy miles are optional. The week moves on when the last lift is done.</div>
             </Card>
           )}
 
-          {nextItems.length > 0 && (
+          {age >= 9 && totals.liftsDone < 4 && (
+            <Card className="p-4 mb-3" onClick={() => onGo('plan')}>
+              <div className="text-[14px] text-neutral-200 font-medium">This week is running long</div>
+              <div className="text-[13px] text-neutral-500 mt-1 leading-relaxed">Totally fine — pick up where you left off. If you've been away, you can skip to next week from Plan.</div>
+            </Card>
+          )}
+
+          {after && (
             <>
-              <SectionLabel>Up next · {DAY_NAMES_LONG[nextIdx]}</SectionLabel>
+              <SectionLabel>After that</SectionLabel>
               <Card className="divide-y divide-neutral-800/70" onClick={() => onGo('plan')}>
-                {nextItems.map((it) => {
-                  const D = DISC[it.d];
-                  return (
-                    <div key={it.id} className="flex items-center gap-3 px-4 py-3">
-                      <div className={`w-1.5 h-1.5 rounded-full ${D.solid}`} />
-                      <div className="text-[14px] text-neutral-200 flex-1">{it.title}</div>
-                      <div className="text-[13px] text-neutral-500 truncate max-w-[55%] text-right">{it.kind === 'lift' ? it.tpl.mainName : it.rx && it.rx.target}</div>
-                    </div>
-                  );
-                })}
+                {after.items.map((it) => (
+                  <div key={it.id} className="flex items-center gap-3 px-4 py-3">
+                    <div className={`w-1.5 h-1.5 rounded-full ${DISC[it.d].solid} ${it.optional ? 'opacity-40' : ''}`} />
+                    <div className="text-[14px] text-neutral-200 flex-1">{it.d === 'pilates' ? 'Pilates' : it.title}</div>
+                    <div className="text-[13px] text-neutral-500 truncate max-w-[55%] text-right">{it.kind === 'lift' ? it.tpl.mainName : it.d === 'pilates' ? it.slot.focus.split(' &')[0].split(',')[0] : it.rx && it.rx.target.replace('~', '')}</div>
+                  </div>
+                ))}
               </Card>
             </>
           )}
@@ -5511,67 +5594,74 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
     };
 
     // ============================================================
-    // PLAN (week)
+    // PLAN — this training week as a checklist in a suggested order
     // ============================================================
-    const PlanView = ({ state, onStartLift, onOpenCardio, onLogExtra }) => {
+    const PlanView = ({ state, onStartLift, onOpenCardio, onLogExtra, onSkipWeek }) => {
       const [openIdx, setOpenIdx] = useState(null);
-      const todayIdx = todayPlanIdx();
-      const mon = parseDateKey(weekStartKey());
-      const sun = new Date(mon); sun.setDate(sun.getDate() + 6);
+      const [confirmSkip, setConfirmSkip] = useState(false);
       const totals = weekTotals(state);
+      const started = new Date(weekStartIso(state));
+      const age = weekAgeDays(state);
+      const groups = nextGroups(state);
+      const nextIdx = groups[0] ? groups[0].idx : null;
       const openItems = openIdx != null ? resolvePlanDay(openIdx, state) : [];
       const waves = [1, 2, 3, 4].map((w) => ({ w, label: ['5s', '3s', 'PR', 'Deload'][w - 1] }));
+      const liftsLeft = DAY_ORDER.filter((d) => !(state.completedThisWeek || {})[d]).map((d) => DAY_TEMPLATES[d].name);
       return (
         <div className="px-5 pb-32 pt-8 max-w-2xl mx-auto">
-          <ScreenHeader eyebrow={`${MONTHS[mon.getMonth()]} ${mon.getDate()} – ${MONTHS[sun.getMonth()]} ${sun.getDate()}`} title="This week" />
+          <ScreenHeader eyebrow={`Cycle ${state.cycle} · ${WEEK_SCHEMES[state.week].label.toLowerCase()}`} title={`Week ${state.week}`} />
 
-          <Card className="p-4 mb-6">
+          <Card className="p-4 mb-2">
             <div className="grid grid-cols-3 gap-4">
               <Meter d="strength" label="Strength" value={totals.liftsDone} target={4} />
               <Meter d="run" label="Running" value={totals.miles} target={totals.plannedMiles} unit="mi" />
               <Meter d="pilates" label="Pilates" value={totals.pilates} target={2} />
             </div>
           </Card>
+          <div className="text-[12px] text-neutral-500 mb-6 px-1">
+            Started {started.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })}{age > 0 ? ` · ${age} day${age === 1 ? '' : 's'} ago` : ''}. Do these in any order — the week moves on when the 4th lift is done.
+          </div>
 
+          <SectionLabel>Suggested order</SectionLabel>
           <div className="space-y-2">
             {WEEK_PLAN.map((day, idx) => {
               const items = resolvePlanDay(idx, state);
-              const date = new Date(mon); date.setDate(date.getDate() + idx);
-              const isToday = idx === todayIdx;
-              const allDone = items.length > 0 && items.filter((x) => !x.optional).every((x) => x.done);
+              const isNext = idx === nextIdx;
+              const allDone = items.filter((x) => !x.optional).every((x) => x.done);
               return (
-                <button key={day.day} onClick={() => items.length && setOpenIdx(idx)}
+                <button key={day.day} onClick={() => setOpenIdx(idx)}
                   className={`w-full text-left flex items-stretch gap-4 rounded-2xl border px-4 py-3.5 active:scale-[0.99] transition-transform ${
-                    isToday ? 'border-neutral-600 bg-neutral-900/60' : 'border-neutral-800/80 bg-neutral-950'}`}>
-                  <div className="w-10 shrink-0 text-center">
-                    <div className={`text-[11px] font-semibold tracking-wider uppercase ${isToday ? 'text-neutral-100' : 'text-neutral-500'}`}>{day.day}</div>
-                    <div className={`font-mono text-xl font-bold leading-tight ${isToday ? 'text-neutral-50' : allDone ? 'text-neutral-600' : 'text-neutral-300'}`}>{date.getDate()}</div>
+                    isNext ? 'border-neutral-600 bg-neutral-900/60' : 'border-neutral-800/80 bg-neutral-950'}`}>
+                  <div className="w-10 shrink-0 flex flex-col items-center justify-center">
+                    {allDone
+                      ? <div className="w-7 h-7 rounded-full bg-green-500/15 border border-green-500/40 flex items-center justify-center"><Check size={13} strokeWidth={3} className="text-green-400" /></div>
+                      : <div className={`font-mono text-xl font-bold ${isNext ? 'text-neutral-50' : 'text-neutral-400'}`}>{idx + 1}</div>}
+                    {isNext && <div className="text-[10px] font-semibold text-neutral-300 mt-0.5 uppercase tracking-wide">Next</div>}
                   </div>
                   <div className="flex-1 min-w-0 space-y-1.5 self-center">
-                    {items.length === 0 && <div className="text-[14px] text-neutral-600">Rest</div>}
-                    {items.map((it) => {
-                      const D = DISC[it.d];
-                      return (
-                        <div key={it.id} className="flex items-center gap-2.5">
-                          {it.done
-                            ? <Check size={13} strokeWidth={3} className="text-green-400 shrink-0" />
-                            : <div className={`w-2 h-2 rounded-full shrink-0 mx-[2.5px] ${D.solid} ${it.optional ? 'opacity-40' : ''}`} />}
-                          <div className={`text-[14px] truncate ${it.done ? 'text-neutral-500' : it.optional ? 'text-neutral-500' : 'text-neutral-100'}`}>
-                            {it.title}
-                            <span className="text-neutral-500"> · {it.kind === 'lift' ? it.tpl.mainName : it.d === 'run' ? (it.rx ? it.rx.target.replace('~', '') : '') : it.slot.focus.split(' &')[0].split(',')[0]}</span>
-                          </div>
+                    {items.map((it) => (
+                      <div key={it.id} className="flex items-center gap-2.5">
+                        {it.done
+                          ? <Check size={13} strokeWidth={3} className="text-green-400 shrink-0" />
+                          : <div className={`w-2 h-2 rounded-full shrink-0 mx-[2.5px] ${DISC[it.d].solid} ${it.optional ? 'opacity-40' : ''}`} />}
+                        <div className={`text-[14px] truncate ${it.done || it.optional ? 'text-neutral-500' : 'text-neutral-100'}`}>
+                          {it.d === 'pilates' ? 'Pilates' : it.title}
+                          <span className="text-neutral-500"> · {it.kind === 'lift' ? it.tpl.mainName : it.d === 'run' ? (it.rx ? it.rx.target.replace('~', '') : '') : it.slot.focus.split(' &')[0].split(',')[0]}</span>
                         </div>
-                      );
-                    })}
+                      </div>
+                    ))}
                   </div>
-                  {items.length > 0 && <ChevronRight size={16} className="text-neutral-600 self-center shrink-0" />}
+                  <ChevronRight size={16} className="text-neutral-600 self-center shrink-0" />
                 </button>
               );
             })}
           </div>
+          <div className="text-[12px] text-neutral-600 mt-3 px-1 leading-relaxed">
+            Take rest days whenever they fit — aim for at least one full day off. Keep squats and deadlifts off the day before the long run or a hard run if you can.
+          </div>
 
           <button onClick={onLogExtra}
-            className="w-full mt-3 h-12 rounded-2xl border border-dashed border-neutral-700 text-[14px] font-medium text-neutral-400 flex items-center justify-center gap-1.5">
+            className="w-full mt-5 h-12 rounded-2xl border border-dashed border-neutral-700 text-[14px] font-medium text-neutral-400 flex items-center justify-center gap-1.5">
             <Plus size={15} /> Log an extra run or Pilates
           </button>
 
@@ -5592,17 +5682,43 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
             </div>
           </Card>
 
+          {liftsLeft.length > 0 && (
+            <>
+              <SectionLabel>Away or short on time?</SectionLabel>
+              <Card className="p-4">
+                <div className="text-[13px] text-neutral-400 leading-relaxed mb-3">
+                  You can finish this week whenever you're back. Or skip ahead: {liftsLeft.join(', ')} {liftsLeft.length === 1 ? 'is' : 'are'} marked missed and week {state.week === 4 ? `1 of cycle ${state.cycle + 1}` : state.week + 1} starts now.
+                  {state.week === 3 ? ' Skipped PR-week lifts keep their training max (no increase, no reset).' : ''}
+                </div>
+                <button onClick={() => setConfirmSkip(true)} className="w-full h-11 rounded-xl border border-neutral-700 text-[14px] font-medium text-neutral-200">
+                  Skip to next week
+                </button>
+              </Card>
+            </>
+          )}
+
           <Sheet open={openIdx != null} onClose={() => setOpenIdx(null)}>
             {openIdx != null && (
               <>
-                <div className="font-display text-3xl tracking-wide text-neutral-50 mb-5">{DAY_NAMES_LONG[openIdx]}</div>
+                <div className="text-[12px] text-neutral-500 mb-1">Suggested day {openIdx + 1}</div>
+                <div className="text-[13px] text-neutral-500 mb-5">Do any of these whenever suits you.</div>
                 {openItems.map((it) => (
                   <BlockCard key={it.id} it={it} state={state}
+                    note={it.kind === 'lift' && liftedToday(state) ? "You've already lifted today. Best saved for tomorrow." : null}
                     onStartLift={(id) => { setOpenIdx(null); onStartLift(id); }}
                     onOpenCardio={(id, e) => { setOpenIdx(null); onOpenCardio(id, e); }} />
                 ))}
               </>
             )}
+          </Sheet>
+
+          <Sheet open={confirmSkip} onClose={() => setConfirmSkip(false)}>
+            <div className="text-[22px] font-semibold text-neutral-50 mb-2">Skip to next week?</div>
+            <div className="text-[14px] text-neutral-400 leading-relaxed mb-6">
+              {liftsLeft.join(', ')} will be marked missed. Runs and Pilates reset for the new week. Nothing already logged is lost.
+            </div>
+            <button onClick={() => { setConfirmSkip(false); onSkipWeek(); }} className="w-full h-12 rounded-xl bg-neutral-100 text-black text-[15px] font-semibold">Skip to next week</button>
+            <button onClick={() => setConfirmSkip(false)} className="w-full h-11 mt-2 text-[14px] text-neutral-400">Keep this week</button>
           </Sheet>
         </div>
       );
@@ -6153,6 +6269,7 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
             // would silently defuse the migration.
             tmRecal20260820: cloud.tmRecal20260820 || false,
             activeSession: cloud.activeSession ?? prev.activeSession,
+            weekStartedAt: cloud.weekStartedAt || prev.weekStartedAt,
             // Preserve the seeded default snack preferences if cloud's is empty.
             snackPreferences: (cloud.snackPreferences && cloud.snackPreferences.trim()) ? cloud.snackPreferences : (prev.snackPreferences || DEFAULT_SNACK_PREFERENCES),
             // Merge trainingMaxes field-by-field so cloud's older schema
@@ -6180,6 +6297,12 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
         })();
         return () => { cancelled = true; };
       }, []);
+
+      // One-time backfill: older state has no training-week start. Anchor it to
+      // this calendar Monday so this week's logs keep counting.
+      useEffect(() => {
+        if (state && !state.weekStartedAt) setState((prev) => prev.weekStartedAt ? prev : { ...prev, weekStartedAt: mondayIso() });
+      }, [state]);
 
       useEffect(() => {
         saveState(state);
@@ -6317,6 +6440,7 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
       };
       const saveCardio = (entry) => {
         setState((prev) => {
+          if (!entry.tw) entry = { ...entry, tw: weekStartIso(prev) };
           const list = (prev.cardioLog || []).filter((c) => c.id !== entry.id);
           const next = [entry, ...list].sort((a, b) => (a.date === b.date ? (a.loggedAt < b.loggedAt ? 1 : -1) : (a.date < b.date ? 1 : -1)));
           return { ...prev, cardioLog: next.slice(0, 1000) };
@@ -6342,6 +6466,7 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
             ...cloud,
             tmRecal20260820: cloud.tmRecal20260820 || false,
             activeSession: cloud.activeSession ?? prev.activeSession,
+            weekStartedAt: cloud.weekStartedAt || prev.weekStartedAt,
             // Preserve the seeded default snack preferences if cloud's is empty.
             snackPreferences: (cloud.snackPreferences && cloud.snackPreferences.trim()) ? cloud.snackPreferences : (prev.snackPreferences || DEFAULT_SNACK_PREFERENCES),
             trainingMaxes: {
@@ -6369,7 +6494,7 @@ Context: I'll have already had ~60g whey from 2 daytime Pure Protein shakes. Bia
       return (
         <div className="min-h-screen bg-black text-neutral-100">
           {view === 'today' && <TodayView state={state} syncStatus={syncStatus} onSettings={() => setView('settings')} onStartLift={handleStart} onOpenCardio={openCardio} onCoach={() => go('coach')} onGo={go} />}
-          {view === 'plan' && <PlanView state={state} onStartLift={handleStart} onOpenCardio={openCardio} onLogExtra={() => setCardioForm({ type: 'run' })} />}
+          {view === 'plan' && <PlanView state={state} onStartLift={handleStart} onOpenCardio={openCardio} onLogExtra={() => setCardioForm({ type: 'run' })} onSkipWeek={() => setState((prev) => skipToNextWeek(prev))} />}
           {view === 'progress' && <ProgressView state={state} initialTab={progressTab} onOpenSettings={() => setView('settings')} onOpenBodyScan={() => setView('body-scan')} onOpenDiet={() => go('diet')} onEditCardio={setCardioForm} onUpdateState={setState} />}
           {view === 'body-scan' && <BodyScanView state={state} onBack={() => go('progress', 'body')} onUpdateState={setState} />}
           {view === 'diet' && <DietView state={state} onBack={() => go('today')} onUpdateState={setState} />}

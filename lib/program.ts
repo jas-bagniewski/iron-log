@@ -200,6 +200,10 @@ export type AppState = {
   history: Session[];
   activeSession: Session | null;
   shareToken?: string | null;
+  // Training weeks are checklists, not calendar weeks: the week rolls when the
+  // 4th lift is done or the owner skips ahead. Cardio entries carry `tw`.
+  weekStartedAt?: string | null;
+  skippedWeeks?: { at: string; cycle: number; week: number; missed: string[] }[];
   // Program v4: runs + Pilates. The plan (slots, prescriptions) lives in index.html (CARDIO_SLOTS, prescribeCardio).
   cardioLog?: CardioEntry[];
 };
@@ -218,6 +222,7 @@ export type CardioEntry = {
   className: string | null;
   notes: string;
   loggedAt: string;
+  tw?: string; // weekStartedAt of the training week it was logged in
   source: "manual";
 };
 
