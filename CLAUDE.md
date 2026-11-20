@@ -51,22 +51,24 @@ Static single-page app. `index.html` boots React 18 via UMD CDN, Tailwind via CD
 Equipment: half rack with pull-up bar, 2 benches, 45 lb bar, 35 lb bar, 25 lb hex bar, curl bar, plenty of plates, DBs 5–75, Tonal, NordicTrack Ultra 1 reformer, Peloton Tread+. No leg press / leg curl machines. Avoid split squats (knee history).
 
 Lift days are budgeted by SETS, not exercise count: ~20 working sets (`SET_BUDGET` 22) fits 60 min with accessories done in pairs (A1/A2). `daySetCount` / `estimateMinutes` show it on screen. Day ids kept from v3 so state/history keep working:
-- **Bench Day** (`chest`, Mon, 20 sets) — Bench 5/3/1 + FSL 5×5 + incline DB press, Tonal single-arm row, Tonal triceps, Tonal face pulls
-- **Squat Day** (`legs`, Tue, 20 sets) — Squat 5/3/1 + FSL 5×5 + barbell hip thrust, goblet squat (3s pause), single-leg DB calf raise, hanging leg raise
-- **Deadlift Day** (`back`, Thu, 19 sets) — Hex bar 5/3/1 + FSL 3×5 + RDL, pull-ups ×4, Tonal Pallof press, DB curls
-- **Press Day** (`fullbody`, Fri, 17 sets) — Press 5/3/1 + Bench BBB 5×10 + barbell rows, Tonal lat pulldown, Tonal lateral raise
+- **Bench Day** (`chest`, 20 sets) — Bench 5/3/1 + FSL 5×5 + incline DB press, Tonal single-arm row, Tonal triceps, Tonal face pulls
+- **Squat Day** (`legs`, 20 sets) — Squat 5/3/1 + FSL 5×5 + barbell hip thrust, goblet squat (3s pause), single-leg DB calf raise, hanging leg raise
+- **Deadlift Day** (`back`, 19 sets) — Hex bar 5/3/1 + FSL 3×5 + RDL, pull-ups ×4, Tonal Pallof press, DB curls
+- **Press Day** (`fullbody`, 17 sets) — Press 5/3/1 + Bench BBB 5×10 + barbell rows, Tonal lat pulldown, Tonal lateral raise
 
 FSL ("First Set Last") = sets at the week's first-set % of that lift's TM; skipped on deload.
 
-Runs + Pilates (`CARDIO_SLOTS`, `WEEK_PLAN`, `prescribeCardio` in index.html), calendar weeks Mon–Sun, logged in `state.cardioLog`:
-- Mon easy 4 mi · Tue Pilates (core, glutes, low back) · Wed quality run (tempo / intervals / progression / strides, rotates with the 5/3/1 week) · Thu optional easy 3 mi · Fri Pilates (hamstrings, hips, flexibility) · Sat long run · Sun rest
-- Long run = last week's long run + 1 mi, capped at 13; ~75% on lifting deload week. At 13, the last 2 mi go to 8:30 pace.
+**Weeks are checklists, not calendar weeks (2026-11-20).** A training week = 4 lifts + 3 runs (+1 optional) + 2 Pilates, in any order over however many days it takes. It rolls over when the 4th lift is finished (`rollTrainingWeek`) or when the owner taps "Skip to next week" in Plan (`skipToNextWeek`, logged in `state.skippedWeeks`; skipped PR-week lifts hold their TM). `state.weekStartedAt` marks the start; cardio entries are stamped `tw` with it. Never tie a session to a weekday or date — the owner travels and trains when they can.
+
+Runs + Pilates (`CARDIO_SLOTS`, `WEEK_PLAN`, `prescribeCardio` in index.html), logged in `state.cardioLog`. `WEEK_PLAN` is only the SUGGESTED order (Day 1–6); Today shows the first suggested day with something left:
+- Day 1 bench + easy 4 mi · Day 2 squat + Pilates (core, glutes, low back) · Day 3 quality run (tempo / intervals / progression / strides, rotates with the 5/3/1 week) · Day 4 deadlift + optional easy 3 mi · Day 5 press + Pilates (hamstrings, hips, flexibility) · Day 6 long run. Slot ids still say easy-mon etc. because logged entries reference them.
+- Long run = previous training week's long run + 1 mi, capped at 13; ~75% on lifting deload week. At 13, the last 2 mi go to 8:30 pace.
 - Goal: half marathon at 8:00/mi. Strength is the priority. Paces are shown with Tread mph.
 - Logging is manual for now. Planned: Strava sync (Peloton → Strava, phone GPS outdoors). iFit/Ultra 1 has no public API.
 
 ## App structure (UI v4)
 
-Tabs: **Today** (only today's blocks + week meters + up next) · **Plan** (week list; tap a day → bottom sheet) · **Progress** (Strength / Running / Pilates / Body segments, each with an insight card) · **Fuel** (diet) · **Coach**.
+Tabs: **Today** (next sessions in the sequence + done today + week meters) · **Plan** (this week's checklist in suggested order; tap → bottom sheet; skip-week) · **Progress** (Strength / Running / Pilates / Body segments, each with an insight card) · **Fuel** (diet) · **Coach**.
 - Three disciplines, one colour each, via `DISC`: Strength orange, Run sky, Pilates violet. Every training surface uses it so the blocks never blur together.
 - Keep screens calm: one primary action per card, details behind a "Details" toggle or a sheet. Don't add data dumps to Today.
 - Run/Pilates logging is one shared `CardioLogForm` sheet owned by `App`.
